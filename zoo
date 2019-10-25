@@ -1,0 +1,125 @@
+
+package zoos.victoria;
+
+import java.util.Scanner;
+
+public class ZoosVictoria {
+
+    /**
+     * @param args the command line arguments
+     */
+    public static void main(String[] args) {
+        Scanner in = new Scanner(System.in);
+
+        int child = 18;
+        int adult = 36;
+        double senior = 32.5;
+        boolean form = true;
+
+        FORM:
+        while (form) {
+
+            System.out.println("         @@@@@   Welcome to Zoos Victoria    @@@@@");
+            System.out.println("");
+            System.out.println("                     M A I N  M E N U");
+            System.out.println("");
+            System.out.println("         Zoo has the following ticketing options:");
+            System.out.println("");
+            System.out.println("              1 = Child (4-5 yrs)");
+            System.out.println("              2 = Adult (18+ yrs)");
+            System.out.println("              3 = Senior (60+ yrs)");
+            System.out.println("");
+            System.out.println("Enter your option:");
+            String input1 = in.nextLine();
+            if (input1.equals("1")) {
+                System.out.println("Enter the number of tickets");
+                int input2 = Integer.parseInt(in.nextLine());
+                if (input2 > 0) {
+                    System.out.println("You are purchasing " + input2 + " child tickets at $" + child + " each!"
+                            + "\nPress 1 to confirm purchase:");
+                    int input3 = Integer.parseInt(in.nextLine());
+                    if (input3 == 1) {
+                        System.out.println("Total Amount for Child tickets: $" + (child * input2)
+                                + "\nDo you wish to continue? (Y/N) ");
+
+                        String input4 = in.nextLine();
+                        if (input4.equalsIgnoreCase("y")) {
+                            continue;
+                        } else if (input4.equalsIgnoreCase("n"));
+                        {
+                            System.out.println("Total amount payable is sdfsd \nHave a good day!");
+                            System.exit(0);
+                        }else {
+                                System.out.println("klmk");
+                                }
+                    } else {
+                        System.out.println("invalid");
+                    }
+                } else {
+                    System.out.println("invalid");
+                }
+            } else if (input1.equals("2")) {
+                System.out.println("Enter the number of tickets");
+                int input2 = Integer.parseInt(in.nextLine());
+                if (input2 > 0) {
+                    System.out.println("You are purchasing " + input2 + " adult tickets at $" + adult + " each!"
+                            + "\nPress 1 to confirm purchase:");
+                    int input3 = Integer.parseInt(in.nextLine());
+                    if (input3 == 1) {
+                        System.out.println("Total Amount for Adult tickets: $" + (child * input2)
+                                + "\nDo you wish to continue? (Y/N) ");
+
+                        String input4 = in.nextLine();
+                        if (input4.equalsIgnoreCase("y")) {
+                            continue;
+                        } else if (input4.equalsIgnoreCase("n"));
+                        {
+                            System.out.println("Total amount payable is sdfsd \nHave a good day!");
+                            System.exit(0);
+                        } else {
+                                System.out.println("klmk");
+                                }
+                    } else {
+                        System.out.println("invalid");
+                    }
+                } else {
+                    System.out.println("invalid");}
+
+                }else if (input1.equals("3")) {
+                            System.out.println("Enter the number of tickets");
+                            int input2 = Integer.parseInt(in.nextLine());
+                            if (input2 > 0) {
+                                System.out.println("You are purchasing " + input2 + " child tickets at $" + child + " each!"
+                                        + "\nPress 1 to confirm purchase:");
+                                int input3 = Integer.parseInt(in.nextLine());
+                                if (input3 == 1) {
+                                    System.out.println("Total Amount for Child tickets: $" + (child * input2)
+                                            + "\nDo you wish to continue? (Y/N) ");
+
+                                    String input4 = in.nextLine();
+                                    if (input4.equalsIgnoreCase("y")) {
+                                        continue;
+                                    } else if (input4.equalsIgnoreCase("n"));
+                                    {
+                                        System.out.println("Total amount payable is sdfsd \nHave a good day!");
+                                        System.exit(0);
+                                    }else {
+                                System.out.println("klmk");
+                                }
+                                } else {
+                                    System.out.println("invalid");
+                                }
+                            } else {
+                                System.out.println("invalid");
+                            }
+
+                        } 
+                            else {
+                System.out.println("invalid");
+                        }
+            }
+        }
+    }
+
+
+
