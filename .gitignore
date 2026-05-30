@@ -1,0 +1,4 @@
+MelonSandbox_Mods/
+*.part
+__pycache__/
+.pytest_cache/
