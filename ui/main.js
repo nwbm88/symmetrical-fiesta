@@ -7,21 +7,22 @@ const dialog = window.__TAURI__.dialog;
 
 const $ = (id) => document.getElementById(id);
 
-/* ------------------------------------------------ state ---- */
+/* ══════════════════════ state ══════════════════════ */
 
 const tracks = []; // { path, name, state: ''|'ok'|'err' }
 let currentIndex = -1;
 let currentInfo = null; // TrackInfo from load_track
-let refProfile = null; // Profile built from studio tracks
+let refProfile = null; // Profile learned from reference songs
 let matchGains = []; // per-track gains computed against refProfile
 let waveMin = [], waveMax = [];
-let statusTimer = null;
 let lastStatus = null;
 let batchTotal = 0;
+let outDir = "";
+let advanced = false;
 
 const AUDIO_EXTS = ["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm", "mkv", "mp4", "aiff", "alac", "caf"];
 
-/* ------------------------------------------------ preset ---- */
+/* ══════════════════════ preset ══════════════════════ */
 
 function collectPreset() {
   return {
@@ -84,6 +85,7 @@ function applyPresetToUI(p) {
   $("p-lufs").value = p.target_lufs ?? -14;
   $("p-trim").value = p.output_gain_db ?? 0;
   $("p-ceil").value = p.limiter_ceiling_db ?? -1;
+  syncSimpleFromAdvanced();
   refreshOutputs();
   pushParams();
 }
@@ -102,8 +104,37 @@ function pushParams() {
   }, 40);
 }
 
+/* ── Simple ⇄ Advanced mirroring ─────────────────────
+   Simple mode drives the same engine parameters through friendlier
+   controls: one "tone" tilt maps to the low/high shelves. */
+
+function syncAdvancedFromSimple() {
+  $("p-denoise").value = $("s-denoise").value;
+  const tone = Number($("s-tone").value);
+  $("p-eq-on").checked = Math.abs(tone) > 0.01 || eqHasManualBands();
+  $("p-eq-hs").value = tone;
+  $("p-eq-ls").value = -tone * 0.6;
+  $("p-comp-on").checked = $("s-comp").checked;
+  $("p-loud-on").checked = $("s-loud").checked;
+  $("p-lufs").value = $("s-lufs").value;
+}
+
+function syncSimpleFromAdvanced() {
+  $("s-denoise").value = $("p-denoise").value;
+  $("s-tone").value = $("p-eq-hs").value;
+  $("s-comp").checked = $("p-comp-on").checked;
+  $("s-loud").checked = $("p-loud-on").checked;
+  $("s-lufs").value = $("p-lufs").value;
+}
+
+/* True when a band other than the two shelves the tone knob drives is set. */
+function eqHasManualBands() {
+  return ["p-eq-p1", "p-eq-p2", "p-eq-p3"].some((id) => Math.abs(Number($(id).value)) > 0.01);
+}
+
 function refreshOutputs() {
   $("o-denoise").textContent = `${$("p-denoise").value}%`;
+  $("o-denoise-simple").textContent = `${$("s-denoise").value}%`;
   $("o-hpf").textContent = `${$("p-hpf").value} Hz`;
   for (const [slider, out] of [
     ["p-eq-ls", "o-eq-ls"], ["p-eq-p1", "o-eq-p1"], ["p-eq-p2", "o-eq-p2"],
@@ -112,12 +143,16 @@ function refreshOutputs() {
     const v = Number($(slider).value);
     $(out).textContent = (v > 0 ? "+" : "") + v.toFixed(1).replace(/\.0$/, "");
   }
+  const tone = Number($("s-tone").value);
+  $("o-tone").textContent =
+    Math.abs(tone) < 0.25 ? "flat" : `${tone > 0 ? "brighter" : "warmer"} ${Math.abs(tone).toFixed(1)} dB`;
   $("o-th").textContent = `${$("p-th").value} dB`;
   $("o-ratio").textContent = `${Number($("p-ratio").value).toFixed(1)}:1`;
   $("o-att").textContent = `${$("p-att").value} ms`;
   $("o-rel").textContent = `${$("p-rel").value} ms`;
   $("o-mk").textContent = `${$("p-mk").value} dB`;
   $("o-lufs").textContent = `${Number($("p-lufs").value).toFixed(1)} LUFS`;
+  $("o-lufs-simple").textContent = `${Number($("s-lufs").value).toFixed(1)} LUFS`;
   $("o-trim").textContent = `${$("p-trim").value} dB`;
   $("o-ceil").textContent = `${Number($("p-ceil").value).toFixed(1)} dB`;
   $("o-match").textContent = `${$("p-match-strength").value}%`;
@@ -127,14 +162,13 @@ function refreshOutputs() {
 function updateLoudInfo() {
   if (!currentInfo) return;
   const target = Number($("p-lufs").value);
-  const src = currentInfo.lufs_dry;
-  const gain = target - src;
+  const gain = target - currentInfo.lufs_dry;
   $("loud-info").textContent =
-    `Source: ${src.toFixed(1)} LUFS → target ${target.toFixed(1)} LUFS ` +
+    `Source: ${currentInfo.lufs_dry.toFixed(1)} LUFS → target ${target.toFixed(1)} LUFS ` +
     `(${gain >= 0 ? "+" : ""}${gain.toFixed(1)} dB). Applied identically across the album at export.`;
 }
 
-/* ------------------------------------------------ status ---- */
+/* ══════════════════════ status / helpers ══════════════════════ */
 
 function setStatus(msg, cls = "") {
   const el = $("status-msg");
@@ -145,8 +179,14 @@ function setStatus(msg, cls = "") {
 function fmtTime(s) {
   if (!isFinite(s) || s < 0) s = 0;
   const m = Math.floor(s / 60);
-  const sec = (s - m * 60).toFixed(1).padStart(4, "0");
-  return `${m}:${sec}`;
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`;
+}
+
+function setMeter(ids, pct) {
+  for (const id of ids) {
+    const el = $(id);
+    if (el) el.style.width = `${pct}%`;
+  }
 }
 
 async function pollStatus() {
@@ -160,30 +200,34 @@ async function pollStatus() {
 
     const toPct = (v) => {
       const db = 20 * Math.log10(Math.max(v, 1e-4));
-      return Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+      return Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
     };
-    $("m-l").style.width = `${toPct(st.peak_l)}%`;
-    $("m-r").style.width = `${toPct(st.peak_r)}%`;
-    $("m-gr").style.width = `${Math.min(100, (st.gain_reduction_db / 20) * 100)}%`;
+    setMeter(["m-l", "m-l-adv"], toPct(st.peak_l));
+    setMeter(["m-r", "m-r-adv"], toPct(st.peak_r));
+    setMeter(["m-gr", "m-gr-adv"], Math.min(100, (st.gain_reduction_db / 20) * 100));
   } catch {
-    /* backend busy; skip one frame */
+    /* backend busy; skip a frame */
   }
 }
 
-/* ------------------------------------------------ waveform ---- */
+/* ══════════════════════ waveform ══════════════════════ */
 
 function drawWave(progress = 0) {
   const canvas = $("waveform");
+  if (!canvas.clientWidth) return;
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  if (canvas.width !== Math.round(w * dpr)) {
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(h * dpr);
+  }
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
   if (!waveMin.length) {
     ctx.fillStyle = "#4a5b74";
-    ctx.font = "12px Segoe UI, sans-serif";
+    ctx.font = "12.5px Segoe UI, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("Load a track to see its waveform", w / 2, h / 2);
     return;
@@ -195,14 +239,13 @@ function drawWave(progress = 0) {
   const playX = progress * w;
   for (let i = 0; i < n; i++) {
     const x = i * bw;
-    const y1 = mid - waveMax[i] * (mid - 4);
-    const y2 = mid - waveMin[i] * (mid - 4);
-    ctx.fillStyle = x <= playX ? "#4dd7ff" : "#27476b";
-    ctx.fillRect(x, y1, Math.max(bw - 0.5, 0.8), Math.max(y2 - y1, 1));
+    const y1 = mid - waveMax[i] * (mid - 5);
+    const y2 = mid - waveMin[i] * (mid - 5);
+    ctx.fillStyle = x <= playX ? "#4dd7ff" : "#294c72";
+    ctx.fillRect(x, y1, Math.max(bw - 0.5, 0.8), Math.max(y2 - y1, 1.2));
   }
-  // playhead
   ctx.fillStyle = "#eaf7ff";
-  ctx.fillRect(playX - 0.5, 0, 1.5, h);
+  ctx.fillRect(playX - 0.75, 0, 1.6, h);
 }
 
 $("waveform").addEventListener("click", async (e) => {
@@ -212,7 +255,43 @@ $("waveform").addEventListener("click", async (e) => {
   await invoke("seek", { seconds: frac * lastStatus.duration_seconds });
 });
 
-/* ------------------------------------------------ tracks ---- */
+/* ══════════════════════ modal ══════════════════════ */
+
+let modalResolve = null;
+
+function askForName(title, sub, initial = "") {
+  $("modal-title").textContent = title;
+  $("modal-sub").textContent = sub;
+  $("modal-input").value = initial;
+  $("modal-overlay").classList.remove("hidden");
+  setTimeout(() => $("modal-input").focus(), 30);
+  return new Promise((resolve) => {
+    modalResolve = resolve;
+  });
+}
+
+function closeModal(value) {
+  $("modal-overlay").classList.add("hidden");
+  if (modalResolve) {
+    modalResolve(value);
+    modalResolve = null;
+  }
+}
+
+$("modal-ok").addEventListener("click", () => closeModal($("modal-input").value.trim() || null));
+$("modal-cancel").addEventListener("click", () => closeModal(null));
+$("modal-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") closeModal($("modal-input").value.trim() || null);
+  if (e.key === "Escape") closeModal(null);
+});
+
+$("btn-help").addEventListener("click", () => $("help-overlay").classList.remove("hidden"));
+$("help-close").addEventListener("click", () => $("help-overlay").classList.add("hidden"));
+$("help-overlay").addEventListener("click", (e) => {
+  if (e.target === $("help-overlay")) $("help-overlay").classList.add("hidden");
+});
+
+/* ══════════════════════ tracks ══════════════════════ */
 
 function renderTrackList() {
   const ul = $("track-list");
@@ -220,7 +299,7 @@ function renderTrackList() {
   if (!tracks.length) {
     const li = document.createElement("li");
     li.className = "empty-hint";
-    li.innerHTML = "Add the tracks of your album here.<br/>Click one to open it in the editor.";
+    li.innerHTML = "Nothing added yet.<br/>Click <b>Add music files</b> to start.";
     ul.appendChild(li);
     return;
   }
@@ -243,7 +322,7 @@ function renderTrackList() {
 async function addTracks() {
   const sel = await dialog.open({
     multiple: true,
-    title: "Add audio tracks",
+    title: "Add music files",
     filters: [{ name: "Audio", extensions: AUDIO_EXTS }],
   });
   if (!sel) return;
@@ -262,8 +341,10 @@ async function loadTrack(index) {
   if (!t) return;
   currentIndex = index;
   renderTrackList();
+  $("welcome").classList.add("hidden");
+  $("workspace").classList.remove("hidden");
   $("load-overlay").classList.remove("hidden");
-  $("load-msg").textContent = `Decoding + AI noise analysis: ${t.name}`;
+  $("load-msg").textContent = `Opening ${t.name} — decoding and analysing noise…`;
   setStatus(`Loading ${t.name}…`);
   try {
     const info = await invoke("load_track", { path: t.path });
@@ -273,18 +354,17 @@ async function loadTrack(index) {
     t.state = "ok";
     $("track-title").textContent = info.file_name;
     $("track-sub").textContent =
-      `${fmtTime(info.duration_seconds)} · source ${info.source_rate} Hz · ` +
+      `${fmtTime(info.duration_seconds)} · ${info.source_rate} Hz · ` +
       `measured ${info.lufs_dry.toFixed(1)} LUFS` +
-      (info.playback_ok ? "" : " · ⚠ no audio device — preview disabled, export still works");
+      (info.playback_ok ? "" : " · ⚠ no audio device — preview off, export still works");
     $("btn-play").disabled = !info.playback_ok;
     updateLoudInfo();
     await invoke("set_params", { preset: collectPreset() });
-    // Matching gains are per-track: recompute against the new track.
     await refreshMatchGains();
-    setStatus(`Loaded ${info.file_name}. Tweak the modules while it plays — then remaster the whole album.`, "ok");
+    setStatus(`Loaded ${info.file_name} — press ✨ Fix it for me to get started.`, "ok");
   } catch (e) {
     t.state = "err";
-    setStatus(`Could not load ${t.name}: ${e}`, "error");
+    setStatus(`Could not open ${t.name}: ${e}`, "error");
   } finally {
     $("load-overlay").classList.add("hidden");
     renderTrackList();
@@ -292,7 +372,7 @@ async function loadTrack(index) {
   }
 }
 
-/* ------------------------------------------------ transport ---- */
+/* ══════════════════════ transport ══════════════════════ */
 
 $("btn-play").addEventListener("click", async () => {
   try {
@@ -310,76 +390,83 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-/* ------------------------------------------------ auto mode ---- */
+let abState = false;
+async function setAB(on) {
+  abState = on;
+  $("btn-bypass").classList.toggle("active", on);
+  $("btn-bypass").textContent = on ? "Original" : "A / B";
+  await invoke("set_bypass", { bypass: on });
+}
+$("btn-bypass").addEventListener("click", () => setAB(!abState));
+
+/* ══════════════════════ auto mode ══════════════════════ */
 
 $("btn-auto").addEventListener("click", async () => {
-  if (currentIndex < 0) return setStatus("Load a track first.", "error");
-  setStatus("Analyzing noise floor, tonal balance and dynamics…");
+  if (currentIndex < 0) return setStatus("Add and open a track first.", "error");
+  setStatus("Listening to the track — noise, tone and dynamics…");
   $("btn-auto").disabled = true;
   try {
     const r = await invoke("auto_settings", { base: collectPreset() });
     applyPresetToUI(r.preset);
-    const el = $("auto-notes");
-    el.innerHTML =
-      "<b>Auto analysis</b><br/>" + r.notes.map((n) => "• " + n).join("<br/>");
-    el.classList.remove("hidden");
-    setStatus("Auto settings applied — fine-tune to taste, and A/B against the original.", "ok");
+    $("auto-notes").innerHTML =
+      "<b>✨ Here's what I found and changed</b><br/>" + r.notes.map((n) => "• " + n).join("<br/>");
+    $("auto-notes").classList.remove("hidden");
+    setStatus("Done — have a listen, then tweak anything you like. Use A / B to compare.", "ok");
   } catch (e) {
-    setStatus(`Auto analysis failed: ${e}`, "error");
+    setStatus(`Auto settings failed: ${e}`, "error");
   } finally {
     $("btn-auto").disabled = false;
   }
 });
 
-/* A/B: click toggles; hold-to-compare also works via mousedown/up */
-const abBtn = $("btn-bypass");
-let abState = false;
-async function setAB(on) {
-  abState = on;
-  abBtn.classList.toggle("active", on);
-  await invoke("set_bypass", { bypass: on });
-}
-abBtn.addEventListener("click", () => setAB(!abState));
+/* ══════════════════════ settings presets ══════════════════════ */
 
-/* ------------------------------------------------ presets ---- */
-
-$("btn-save-preset").addEventListener("click", async () => {
+async function doSavePreset() {
   const path = await dialog.save({
-    title: "Save preset",
-    defaultPath: "clearwave-preset.json",
-    filters: [{ name: "ClearWave preset", extensions: ["json"] }],
+    title: "Save these settings",
+    defaultPath: "clearwave-settings.json",
+    filters: [{ name: "ClearWave settings", extensions: ["json"] }],
   });
   if (!path) return;
   try {
     await invoke("save_preset", { path, preset: collectPreset() });
-    setStatus(`Preset saved: ${path}`, "ok");
+    setStatus(`Settings saved: ${path}`, "ok");
   } catch (e) {
-    setStatus(`Preset save failed: ${e}`, "error");
+    setStatus(`Could not save settings: ${e}`, "error");
   }
-});
+}
 
-$("btn-load-preset").addEventListener("click", async () => {
+async function doLoadPreset() {
   const path = await dialog.open({
-    title: "Load preset",
+    title: "Load settings",
     multiple: false,
-    filters: [{ name: "ClearWave preset", extensions: ["json"] }],
+    filters: [{ name: "ClearWave settings", extensions: ["json"] }],
   });
   if (!path) return;
   try {
-    const p = await invoke("load_preset", { path });
-    applyPresetToUI(p);
-    setStatus(`Preset loaded: ${path}`, "ok");
+    applyPresetToUI(await invoke("load_preset", { path }));
+    setStatus("Settings loaded.", "ok");
   } catch (e) {
-    setStatus(`Preset load failed: ${e}`, "error");
+    setStatus(`Could not load settings: ${e}`, "error");
   }
-});
+}
 
-/* ------------------------------------------------ reference profile ---- */
+$("btn-save-preset").addEventListener("click", doSavePreset);
+$("btn-load-preset").addEventListener("click", doLoadPreset);
+$("btn-save-preset-adv").addEventListener("click", doSavePreset);
+$("btn-load-preset-adv").addEventListener("click", doLoadPreset);
 
-function profileInfoText() {
-  return refProfile
-    ? `Profile “${refProfile.name}” — built from ${refProfile.num_tracks} track(s).`
-    : "No profile loaded.";
+/* ══════════════════════ reference profile ══════════════════════ */
+
+function showProfile() {
+  const has = !!refProfile;
+  $("profile-empty").classList.toggle("hidden", has);
+  $("profile-loaded").classList.toggle("hidden", !has);
+  if (has) {
+    $("profile-name").textContent = refProfile.name || "Untitled profile";
+    $("profile-meta").textContent =
+      `Learned from ${refProfile.num_tracks} song${refProfile.num_tracks === 1 ? "" : "s"}`;
+  }
 }
 
 async function refreshMatchGains() {
@@ -395,69 +482,99 @@ async function refreshMatchGains() {
     });
     pushParams();
   } catch (e) {
-    setStatus(`Match failed: ${e}`, "error");
+    setStatus(`Matching failed: ${e}`, "error");
   }
 }
 
 $("btn-build-profile").addEventListener("click", async () => {
   const sel = await dialog.open({
     multiple: true,
-    title: "Pick clean studio tracks to learn from (2–10 recommended)",
+    title: "Pick good-sounding songs to learn from (2–10 works well)",
     filters: [{ name: "Audio", extensions: AUDIO_EXTS }],
   });
   if (!sel) return;
   const files = Array.isArray(sel) ? sel : [sel];
-  setStatus(`Fingerprinting ${files.length} reference track(s)…`);
+
+  const suggested = files.length === 1
+    ? files[0].split(/[\\/]/).pop().replace(/\.[^.]+$/, "")
+    : `${files.length} songs`;
+  const name = await askForName(
+    "Name this target sound",
+    "Give it a name you'll recognise later — like “Dad's band — studio” or “My vocals 2019”.",
+    suggested
+  );
+  if (name === null) return;
+
+  setStatus(`Listening to ${files.length} song${files.length === 1 ? "" : "s"}…`);
   $("btn-build-profile").disabled = true;
   try {
-    refProfile = await invoke("build_profile", {
-      files,
-      name: `${files.length}-track reference`,
-    });
-    $("profile-info").textContent = profileInfoText();
-    $("btn-save-profile").disabled = false;
+    refProfile = await invoke("build_profile", { files, name });
     $("p-match-on").checked = true;
+    showProfile();
     await refreshMatchGains();
-    setStatus("Reference profile ready — matching is live. A/B to hear it.", "ok");
+    setStatus(`“${refProfile.name}” is ready — your remasters now aim for that sound.`, "ok");
   } catch (e) {
-    setStatus(`Profile build failed: ${e}`, "error");
+    setStatus(`Could not learn from those songs: ${e}`, "error");
   } finally {
     $("btn-build-profile").disabled = false;
   }
 });
 
+$("btn-rename-profile").addEventListener("click", async () => {
+  if (!refProfile) return;
+  const name = await askForName(
+    "Rename this target sound",
+    "This is just a label — it doesn't change how the profile sounds.",
+    refProfile.name || ""
+  );
+  if (name === null) return;
+  refProfile.name = name;
+  showProfile();
+  setStatus(`Renamed to “${name}”.`, "ok");
+});
+
 $("btn-save-profile").addEventListener("click", async () => {
   if (!refProfile) return;
+  const safe = (refProfile.name || "profile").replace(/[^\w\-. ]+/g, "_");
   const path = await dialog.save({
-    title: "Save reference profile",
-    defaultPath: "clearwave-profile.json",
+    title: "Save target sound",
+    defaultPath: `${safe}.json`,
     filters: [{ name: "ClearWave profile", extensions: ["json"] }],
   });
   if (!path) return;
   try {
     await invoke("save_profile", { path, reference: refProfile });
-    setStatus(`Profile saved: ${path}`, "ok");
+    setStatus(`Saved: ${path}`, "ok");
   } catch (e) {
-    setStatus(`Profile save failed: ${e}`, "error");
+    setStatus(`Could not save profile: ${e}`, "error");
   }
 });
 
 $("btn-load-profile").addEventListener("click", async () => {
   const path = await dialog.open({
-    title: "Load reference profile",
+    title: "Open a saved target sound",
     multiple: false,
     filters: [{ name: "ClearWave profile", extensions: ["json"] }],
   });
   if (!path) return;
   try {
     refProfile = await invoke("load_profile", { path });
-    $("profile-info").textContent = profileInfoText();
-    $("btn-save-profile").disabled = false;
+    $("p-match-on").checked = true;
+    showProfile();
     await refreshMatchGains();
-    setStatus("Profile loaded.", "ok");
+    setStatus(`“${refProfile.name || "Profile"}” loaded.`, "ok");
   } catch (e) {
-    setStatus(`Profile load failed: ${e}`, "error");
+    setStatus(`Could not open profile: ${e}`, "error");
   }
+});
+
+$("btn-clear-profile").addEventListener("click", async () => {
+  refProfile = null;
+  matchGains = [];
+  $("p-match-on").checked = false;
+  showProfile();
+  pushParams();
+  setStatus("Target sound removed.");
 });
 
 $("p-match-on").addEventListener("input", refreshMatchGains);
@@ -467,12 +584,10 @@ $("p-match-strength").addEventListener("input", () => {
   window._matchTimer = setTimeout(refreshMatchGains, 80);
 });
 
-/* ------------------------------------------------ export ---- */
-
-let outDir = "";
+/* ══════════════════════ export ══════════════════════ */
 
 $("btn-out-dir").addEventListener("click", async () => {
-  const dir = await dialog.open({ directory: true, title: "Choose output folder" });
+  const dir = await dialog.open({ directory: true, title: "Choose where to save" });
   if (dir) {
     outDir = dir;
     $("out-dir").value = dir;
@@ -486,7 +601,6 @@ $("ai-external").addEventListener("change", () => {
   $("voice-fields").classList.toggle("hidden", mode !== "voice");
 });
 
-/* Build the ExternalOptions object for the backend. */
 function externalOptions() {
   const mode = $("ai-external").value;
   if (mode === "deepfilter") {
@@ -517,16 +631,16 @@ function externalOptions() {
 }
 
 $("btn-export-one").addEventListener("click", async () => {
-  if (currentIndex < 0) return setStatus("Load a track first.", "error");
+  if (currentIndex < 0) return setStatus("Open a track first.", "error");
   const fmt = $("out-format").value;
   const stem = tracks[currentIndex].name.replace(/\.[^.]+$/, "");
   const path = await dialog.save({
-    title: "Export remastered track",
+    title: "Export this track",
     defaultPath: `${stem} [remastered].${fmt}`,
     filters: [{ name: fmt.toUpperCase(), extensions: [fmt] }],
   });
   if (!path) return;
-  setStatus("Rendering… (two-pass loudness, this takes a moment)");
+  setStatus("Rendering… (measuring loudness twice for an exact match)");
   $("btn-export-one").disabled = true;
   try {
     const msg = await invoke("export_track", {
@@ -545,8 +659,8 @@ $("btn-export-one").addEventListener("click", async () => {
 });
 
 $("btn-export-all").addEventListener("click", async () => {
-  if (!tracks.length) return setStatus("Add tracks first.", "error");
-  if (!outDir) return setStatus("Choose an output folder first.", "error");
+  if (!tracks.length) return setStatus("Add some music first.", "error");
+  if (!outDir) return setStatus("Choose a folder to save into first.", "error");
   batchTotal = tracks.length;
   $("batch-progress").classList.remove("hidden");
   $("btn-cancel-batch").classList.remove("hidden");
@@ -563,7 +677,7 @@ $("btn-export-all").addEventListener("click", async () => {
       reference: $("p-match-on").checked ? refProfile : null,
     });
   } catch (e) {
-    setStatus(`Batch failed to start: ${e}`, "error");
+    setStatus(`Could not start: ${e}`, "error");
     $("btn-export-all").disabled = false;
     $("btn-cancel-batch").classList.add("hidden");
   }
@@ -575,59 +689,94 @@ listen("batch-progress", (ev) => {
   const p = ev.payload;
   if (p.done) {
     $("batch-bar").style.width = "100%";
-    $("batch-label").textContent = "Batch finished.";
+    $("batch-label").textContent = "All done.";
     $("btn-export-all").disabled = false;
     $("btn-cancel-batch").classList.add("hidden");
-    setStatus("Album remaster complete ✓ — all tracks normalized to the same loudness.", "ok");
+    setStatus("✓ Album remastered — every track at the same volume, saved to your folder.", "ok");
     return;
   }
-  const frac = batchTotal ? ((p.index + (p.stage === "done" ? 1 : 0.5)) / batchTotal) : 0;
+  const frac = batchTotal ? (p.index + (p.stage === "done" ? 1 : 0.5)) / batchTotal : 0;
   $("batch-bar").style.width = `${Math.round(frac * 100)}%`;
   if (p.stage === "processing") {
-    $("batch-label").textContent = `(${p.index + 1}/${p.total}) ${p.file}…`;
+    $("batch-label").textContent = `(${p.index + 1} of ${p.total}) ${p.file}…`;
   } else if (p.stage === "error") {
     setStatus(`${p.file}: ${p.error}`, "error");
   }
 });
 
-/* ------------------------------------------------ wiring ---- */
+/* ══════════════════════ mode switch ══════════════════════ */
+
+function setMode(adv) {
+  advanced = adv;
+  $("mode-simple").classList.toggle("active", !adv);
+  $("mode-advanced").classList.toggle("active", adv);
+  $("simple-controls").classList.toggle("hidden", adv);
+  $("modules").classList.toggle("hidden", !adv);
+  for (const el of document.querySelectorAll(".adv-only")) {
+    el.classList.toggle("hidden", !adv);
+  }
+  if (adv) syncSimpleFromAdvanced();
+  else syncSimpleFromAdvanced();
+  refreshOutputs();
+  drawWave(lastStatus && lastStatus.duration_seconds > 0
+    ? lastStatus.position_seconds / lastStatus.duration_seconds : 0);
+}
+
+$("mode-simple").addEventListener("click", () => setMode(false));
+$("mode-advanced").addEventListener("click", () => setMode(true));
+
+/* ══════════════════════ wiring ══════════════════════ */
 
 $("btn-add-tracks").addEventListener("click", addTracks);
+$("btn-welcome-add").addEventListener("click", addTracks);
 
-for (const el of document.querySelectorAll("input[type=range], input[type=number], input[type=checkbox]")) {
-  el.addEventListener("input", pushParams);
+// Advanced controls drive the engine directly.
+for (const el of document.querySelectorAll("#modules input")) {
+  el.addEventListener("input", () => {
+    syncSimpleFromAdvanced();
+    pushParams();
+  });
+}
+// Simple controls map onto the same parameters.
+for (const el of document.querySelectorAll("#simple-controls input")) {
+  el.addEventListener("input", () => {
+    syncAdvancedFromSimple();
+    pushParams();
+  });
 }
 
 async function detectTools() {
   try {
     const t = await invoke("detect_tools");
-    $("tool-ffmpeg").classList.toggle("on", t.ffmpeg);
-    $("tool-deepfilter").classList.toggle("on", t.deepfilter);
-    $("tool-uvr").classList.toggle("on", t.uvr);
-    $("tool-demucs").classList.toggle("on", t.demucs);
-    $("tool-uvr").title = t.uvr
-      ? "audio-separator found — Crowd removal available under Deep clean"
-      : "audio-separator not found — `pip install \"audio-separator[gpu]\"` to enable AI crowd removal";
-    $("tool-ffmpeg").title = t.ffmpeg
-      ? "ffmpeg found — MP3/FLAC/M4A export enabled"
-      : "ffmpeg not found — install it to export MP3/FLAC/M4A (WAV always works)";
-    $("tool-deepfilter").title = t.deepfilter
-      ? "DeepFilterNet found — available under Deep clean"
-      : "DeepFilterNet not found — see README to install (optional)";
-    $("tool-demucs").title = t.demucs
-      ? "Demucs found — usable via custom Deep clean command"
-      : "Demucs not found — see README to install (optional)";
+    const set = (id, on, yes, no) => {
+      $(id).classList.toggle("on", on);
+      $(id).title = on ? yes : no;
+    };
+    set("tool-ffmpeg", t.ffmpeg,
+      "ffmpeg found — MP3/FLAC/M4A export enabled",
+      "ffmpeg not found — install it for MP3/FLAC/M4A (WAV always works)");
+    set("tool-deepfilter", t.deepfilter,
+      "DeepFilterNet found — stronger noise removal available",
+      "DeepFilterNet not found — optional, see the README");
+    set("tool-uvr", t.uvr,
+      "audio-separator found — crowd removal and vocal rescue available",
+      'audio-separator not found — pip install "audio-separator[gpu]" to enable');
+    set("tool-demucs", t.demucs,
+      "Demucs found — usable as a custom command",
+      "Demucs not found — optional, see the README");
+    $("format-hint").textContent = t.ffmpeg
+      ? "All formats available."
+      : "Only WAV is available until ffmpeg is installed (winget install ffmpeg).";
   } catch { /* ignore */ }
 }
 
-window.addEventListener("resize", () => drawWave(
-  lastStatus && lastStatus.duration_seconds > 0
-    ? lastStatus.position_seconds / lastStatus.duration_seconds
-    : 0
-));
+window.addEventListener("resize", () =>
+  drawWave(lastStatus && lastStatus.duration_seconds > 0
+    ? lastStatus.position_seconds / lastStatus.duration_seconds : 0));
 
+showProfile();
 refreshOutputs();
 drawWave(0);
 detectTools();
 invoke("set_params", { preset: collectPreset() }).catch(() => {});
-statusTimer = setInterval(pollStatus, 100);
+setInterval(pollStatus, 100);

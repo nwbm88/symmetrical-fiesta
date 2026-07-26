@@ -7,250 +7,427 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <!-- ══════════════════════ title bar ══════════════════════ -->
   <header id="topbar">
     <div class="brand">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <rect x="1" y="1" width="22" height="22" rx="5" fill="#0e2233"/>
-        <path d="M4.5 12h1.6M7.6 12V8.2M7.6 12v3.8M10.7 12V5.4M10.7 12v6.6M13.8 12V7.2M13.8 12v4.8M16.9 12V9.4M16.9 12v2.6M19.5 12h-1" stroke="#4dd7ff" stroke-width="1.6" stroke-linecap="round"/>
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="1" y="1" width="22" height="22" rx="6" fill="#0e2233"/>
+        <path d="M4.5 12h1.6M7.6 12V8.2M7.6 12v3.8M10.7 12V5.4M10.7 12v6.6M13.8 12V7.2M13.8 12v4.8M16.9 12V9.4M16.9 12v2.6M19.5 12h-1"
+              stroke="#4dd7ff" stroke-width="1.7" stroke-linecap="round"/>
       </svg>
       <div>
         <h1>ClearWave</h1>
-        <span class="tagline">restore &amp; remaster — 100% local</span>
+        <span class="tagline">Make rough recordings sound good — everything stays on your PC</span>
       </div>
     </div>
+
     <div class="topbar-actions">
-      <div class="tools" id="tool-badges" title="Optional external tools detected on this PC">
-        <span class="tool-badge" id="tool-ffmpeg">ffmpeg</span>
-        <span class="tool-badge" id="tool-deepfilter">DeepFilterNet</span>
-        <span class="tool-badge" id="tool-uvr">UVR</span>
-        <span class="tool-badge" id="tool-demucs">Demucs</span>
+      <div class="mode-switch" role="group" aria-label="Interface mode">
+        <button id="mode-simple" class="mode-btn active">Simple</button>
+        <button id="mode-advanced" class="mode-btn">Advanced</button>
       </div>
-      <button id="btn-load-preset" class="btn">Load preset</button>
-      <button id="btn-save-preset" class="btn">Save preset</button>
-      <button id="btn-bypass" class="btn btn-ab" title="Hold to compare with the untouched original (or click to toggle)">A/B&nbsp;Original</button>
+      <button id="btn-help" class="btn btn-ghost" title="What do these controls do?">? Help</button>
     </div>
   </header>
 
   <main id="layout">
-    <!-- ============ left: album queue + export ============ -->
+    <!-- ══════════════════════ sidebar: the 3 steps ══════════════════════ -->
     <aside id="sidebar">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Album tracks</h2>
-          <button id="btn-add-tracks" class="btn btn-accent btn-sm">+ Add</button>
+      <div id="sidebar-scroll">
+
+      <!-- STEP 1 -->
+      <section class="step">
+        <div class="step-head">
+          <span class="step-num">1</span>
+          <div>
+            <h2>Add your music</h2>
+            <p class="step-sub">The album or tracks you want to fix</p>
+          </div>
         </div>
+        <button id="btn-add-tracks" class="btn btn-accent btn-block">+ Add music files</button>
         <ul id="track-list" class="track-list">
-          <li class="empty-hint">Add the tracks of your album here.<br/>Click one to open it in the editor.</li>
+          <li class="empty-hint">Nothing added yet.<br/>Click <b>Add music files</b> to start.</li>
         </ul>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Reference profile <span class="chip">match</span></h2>
-          <label class="switch"><input type="checkbox" id="p-match-on" /><span></span></label>
-        </div>
-        <p class="hint" style="margin-top:0">Feed it clean studio tracks (same artist or a sound you love). ClearWave fingerprints their tonal balance and morphs every remaster toward it.</p>
-        <div class="export-buttons" style="margin-top:8px">
-          <button id="btn-build-profile" class="btn">Build from studio tracks…</button>
-          <div class="row">
-            <button id="btn-load-profile" class="btn btn-sm" style="flex:1">Load</button>
-            <button id="btn-save-profile" class="btn btn-sm" style="flex:1" disabled>Save</button>
+      <!-- STEP 2 -->
+      <section class="step">
+        <div class="step-head">
+          <span class="step-num">2</span>
+          <div>
+            <h2>Target sound <span class="optional">optional</span></h2>
+            <p class="step-sub">Teach ClearWave the sound to aim for</p>
           </div>
         </div>
-        <p id="profile-info" class="hint">No profile loaded.</p>
-        <div class="field">
-          <label>Strength <output id="o-match">100%</output></label>
-          <input type="range" id="p-match-strength" min="0" max="150" value="100" step="5" />
+
+        <div id="profile-empty">
+          <p class="hint">Give it a few good-sounding songs — your studio recordings, your band's best takes, or any album you love. ClearWave learns their tone and steers your remasters toward it.</p>
+          <button id="btn-build-profile" class="btn btn-block">🎯 Learn from songs…</button>
+          <button id="btn-load-profile" class="btn btn-ghost btn-block btn-sm">Open a saved profile</button>
+        </div>
+
+        <div id="profile-loaded" class="hidden">
+          <div class="profile-card">
+            <div class="profile-card-top">
+              <div>
+                <div class="profile-name" id="profile-name">—</div>
+                <div class="profile-meta" id="profile-meta">—</div>
+              </div>
+              <label class="switch" title="Use this profile"><input type="checkbox" id="p-match-on" /><span></span></label>
+            </div>
+            <div class="field field-tight">
+              <label>How strongly to match <output id="o-match">100%</output></label>
+              <input type="range" id="p-match-strength" min="0" max="150" value="100" step="5" />
+            </div>
+            <div class="row">
+              <button id="btn-rename-profile" class="btn btn-sm btn-ghost" style="flex:1">Rename</button>
+              <button id="btn-save-profile" class="btn btn-sm btn-ghost" style="flex:1">Save</button>
+              <button id="btn-clear-profile" class="btn btn-sm btn-ghost" style="flex:1">Remove</button>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section class="panel">
-        <div class="panel-head"><h2>Export</h2></div>
+      <!-- STEP 3 -->
+      <section class="step">
+        <div class="step-head">
+          <span class="step-num">3</span>
+          <div>
+            <h2>Save the results</h2>
+            <p class="step-sub">Apply your settings to every track</p>
+          </div>
+        </div>
+
         <div class="field">
-          <label>Output folder</label>
+          <label class="field-label">Save into folder</label>
           <div class="row">
             <input id="out-dir" type="text" placeholder="Choose a folder…" readonly />
-            <button id="btn-out-dir" class="btn btn-sm">…</button>
+            <button id="btn-out-dir" class="btn btn-sm">Browse</button>
           </div>
         </div>
+
         <div class="field">
-          <label>Format</label>
+          <label class="field-label">File type</label>
           <select id="out-format">
-            <option value="wav">WAV (24-bit, always available)</option>
-            <option value="flac">FLAC (needs ffmpeg)</option>
-            <option value="mp3">MP3 (needs ffmpeg)</option>
-            <option value="m4a">M4A / AAC (needs ffmpeg)</option>
+            <option value="wav">WAV — best quality</option>
+            <option value="flac">FLAC — best quality, smaller</option>
+            <option value="mp3">MP3 — plays everywhere</option>
+            <option value="m4a">M4A / AAC — Apple friendly</option>
           </select>
+          <p class="hint" id="format-hint"></p>
         </div>
-        <div class="field">
-          <label>Deep clean (external AI, optional)</label>
-          <select id="ai-external">
-            <option value="">Off — use built-in AI denoise only</option>
-            <option value="deepfilter">DeepFilterNet — strong denoise</option>
-            <option value="crowd">Crowd removal — UVR (audio-separator)</option>
-            <option value="voice">Stem rescue — vocals (separate → voice-process → remix)</option>
-            <option value="custom">Custom command…</option>
-          </select>
-          <input id="ai-custom-cmd" type="text" class="hidden" placeholder='mytool "{in}" -o "{out}"  (or {outdir})' />
-          <input id="ai-custom-pick" type="text" class="hidden" placeholder="pick output containing… (e.g. No Crowd)" />
-          <div id="voice-fields" class="hidden">
-            <input id="ai-voice-cmd" type="text" placeholder='voice tool for the vocal stem, e.g. resemble-enhance "{in}" "{out}" — or your Applio/RVC CLI' />
-            <div class="row" style="margin-top:6px">
-              <div style="flex:1"><label class="mini-label">Vocal dB</label><input id="ai-vocal-gain" type="number" value="0" min="-12" max="12" step="0.5" style="width:100%" /></div>
-              <div style="flex:1"><label class="mini-label">Band dB</label><input id="ai-inst-gain" type="number" value="0" min="-12" max="12" step="0.5" style="width:100%" /></div>
-            </div>
-            <p class="hint">Only use voice models of yourself or people who gave you permission.</p>
+      </section>
+
+      <!-- extras -->
+      <section class="step step-quiet adv-only">
+        <div class="step-head">
+          <span class="step-num step-num-quiet">＋</span>
+          <div>
+            <h2>Extra AI cleanup</h2>
+            <p class="step-sub">Optional helper tools on your PC</p>
           </div>
-          <p class="hint">Runs before the chain during export/batch. Everything stays on this PC.</p>
         </div>
-        <div class="export-buttons">
-          <button id="btn-export-one" class="btn">Export current track</button>
-          <button id="btn-export-all" class="btn btn-accent">Remaster whole album</button>
-          <button id="btn-cancel-batch" class="btn btn-danger hidden">Cancel batch</button>
+        <select id="ai-external">
+          <option value="">None — use built-in cleanup only</option>
+          <option value="deepfilter">Stronger noise removal (DeepFilterNet)</option>
+          <option value="crowd">Remove audience noise (UVR)</option>
+          <option value="voice">Rescue the vocals (separate → improve → remix)</option>
+          <option value="custom">Custom command…</option>
+        </select>
+        <input id="ai-custom-cmd" type="text" class="hidden" placeholder='mytool "{in}" -o "{out}"' />
+        <input id="ai-custom-pick" type="text" class="hidden" placeholder="use output containing… e.g. No Crowd" />
+        <div id="voice-fields" class="hidden">
+          <input id="ai-voice-cmd" type="text" placeholder='resemble-enhance "{in}" "{out}"' />
+          <div class="row" style="margin-top:6px">
+            <div style="flex:1"><label class="mini-label">Vocal level</label><input id="ai-vocal-gain" type="number" value="0" min="-12" max="12" step="0.5" /></div>
+            <div style="flex:1"><label class="mini-label">Band level</label><input id="ai-inst-gain" type="number" value="0" min="-12" max="12" step="0.5" /></div>
+          </div>
+          <p class="hint">Only use voice models of yourself or people who gave you permission.</p>
         </div>
+        <div class="tools" id="tool-badges">
+          <span class="tool-badge" id="tool-ffmpeg">ffmpeg</span>
+          <span class="tool-badge" id="tool-deepfilter">DeepFilterNet</span>
+          <span class="tool-badge" id="tool-uvr">UVR</span>
+          <span class="tool-badge" id="tool-demucs">Demucs</span>
+        </div>
+        <p class="hint">Green = installed and ready. Everything works without them.</p>
+      </section>
+      </div><!-- /sidebar-scroll -->
+
+      <!-- pinned action bar: always reachable -->
+      <div id="sidebar-actions">
+        <button id="btn-export-all" class="btn btn-accent btn-block btn-lg">✓ Remaster all tracks</button>
+        <button id="btn-export-one" class="btn btn-ghost btn-block btn-sm">Just export the current track</button>
+        <button id="btn-cancel-batch" class="btn btn-danger btn-block btn-sm hidden">Stop</button>
         <div id="batch-progress" class="hidden">
           <div class="progress"><div id="batch-bar"></div></div>
           <p id="batch-label" class="hint"></p>
         </div>
-      </section>
+      </div>
     </aside>
 
-    <!-- ============ main editor ============ -->
+    <!-- ══════════════════════ main editor ══════════════════════ -->
     <section id="editor">
-      <section class="panel" id="wave-panel">
-        <div class="wave-head">
-          <div>
-            <h2 id="track-title">No track loaded</h2>
-            <span id="track-sub" class="hint"></span>
-          </div>
-          <div class="transport">
-            <button id="btn-auto" class="btn btn-accent" title="Analyze this track and set every module automatically — a starting point you can then fine-tune">✨ Auto settings</button>
-            <span id="time-now" class="time">0:00.0</span>
-            <button id="btn-play" class="btn btn-play" disabled>▶</button>
-            <span id="time-total" class="time">0:00.0</span>
-          </div>
+
+      <!-- welcome state -->
+      <div id="welcome" class="welcome">
+        <div class="welcome-art">
+          <svg width="76" height="76" viewBox="0 0 24 24" fill="none">
+            <rect x="1" y="1" width="22" height="22" rx="6" fill="#0e2233"/>
+            <path d="M4.5 12h1.6M7.6 12V8.2M7.6 12v3.8M10.7 12V5.4M10.7 12v6.6M13.8 12V7.2M13.8 12v4.8M16.9 12V9.4M16.9 12v2.6M19.5 12h-1"
+                  stroke="#4dd7ff" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
         </div>
-        <canvas id="waveform" height="140"></canvas>
+        <h2>Let's fix that recording</h2>
+        <p>Add your music on the left, then press <b>✨ Fix it for me</b>. ClearWave listens to the track, works out what's wrong, and sets everything up for you.</p>
+        <div class="welcome-steps">
+          <div class="wstep"><span>1</span><div><b>Add music</b><br/>Your album or single tracks</div></div>
+          <div class="wstep"><span>2</span><div><b>Fix one track</b><br/>Auto settings, then tweak by ear</div></div>
+          <div class="wstep"><span>3</span><div><b>Apply to all</b><br/>One click for the whole album</div></div>
+        </div>
+        <button id="btn-welcome-add" class="btn btn-accent btn-lg">+ Add music files</button>
+      </div>
+
+      <!-- workspace -->
+      <div id="workspace" class="hidden">
+        <section class="panel" id="wave-panel">
+          <div class="wave-head">
+            <div class="track-title-wrap">
+              <h2 id="track-title">No track loaded</h2>
+              <span id="track-sub" class="hint"></span>
+            </div>
+            <div class="transport">
+              <button id="btn-auto" class="btn btn-magic" title="Analyze this track and set everything automatically">✨ Fix it for me</button>
+              <div class="transport-play">
+                <span id="time-now" class="time">0:00.0</span>
+                <button id="btn-play" class="btn btn-play" disabled title="Play / pause (Space)">▶</button>
+                <span id="time-total" class="time">0:00.0</span>
+              </div>
+              <button id="btn-bypass" class="btn btn-ab" title="Hear the untouched original">A / B</button>
+            </div>
+          </div>
+          <canvas id="waveform" height="150"></canvas>
+          <p class="wave-tip hint">Click the waveform to jump. Press <b>Space</b> to play. Hit <b>A / B</b> any time to hear the original.</p>
+          <div id="load-overlay" class="hidden"><div class="spinner"></div><span id="load-msg">Working…</span></div>
+        </section>
+
         <div id="auto-notes" class="auto-notes hidden"></div>
-        <div id="load-overlay" class="hidden"><div class="spinner"></div><span id="load-msg">Decoding + AI analysis…</span></div>
-      </section>
 
-      <div id="modules">
-        <!-- AI denoise -->
-        <section class="panel module" data-module="denoise">
-          <div class="panel-head">
-            <h2>AI Denoise <span class="chip">neural · local</span></h2>
-          </div>
-          <div class="field">
-            <label>Amount <output id="o-denoise">0%</output></label>
-            <input type="range" id="p-denoise" min="0" max="100" value="0" step="1" />
-          </div>
-          <p class="hint">RNNoise neural network, precomputed per track — drag while playing to hear it blend in real time.</p>
-        </section>
+        <!-- ─────── simple controls ─────── -->
+        <div id="simple-controls">
+          <div class="simple-grid">
+            <section class="panel card">
+              <div class="card-head">
+                <span class="card-icon">🔇</span>
+                <div>
+                  <h3>Remove noise &amp; hiss</h3>
+                  <p class="card-sub">Background hiss, tape noise, room rumble</p>
+                </div>
+              </div>
+              <div class="field">
+                <label>Strength <output id="o-denoise-simple">0%</output></label>
+                <input type="range" id="s-denoise" min="0" max="100" value="0" step="1" />
+              </div>
+              <p class="hint">Too much can make music sound underwater — 30–70% is usually the sweet spot.</p>
+            </section>
 
-        <!-- HPF -->
-        <section class="panel module">
-          <div class="panel-head">
-            <h2>Rumble Filter</h2>
-            <label class="switch"><input type="checkbox" id="p-hpf-on" checked /><span></span></label>
-          </div>
-          <div class="field">
-            <label>High-pass <output id="o-hpf">30 Hz</output></label>
-            <input type="range" id="p-hpf" min="20" max="200" value="30" step="1" />
-          </div>
-          <p class="hint">Cuts sub-bass rumble, mic thumps and mud.</p>
-        </section>
+            <section class="panel card">
+              <div class="card-head">
+                <span class="card-icon">🎚️</span>
+                <div>
+                  <h3>Tone</h3>
+                  <p class="card-sub">Warmer (more bass) or brighter (more treble)</p>
+                </div>
+              </div>
+              <div class="field">
+                <label><span>Warmer</span><span>Brighter</span></label>
+                <input type="range" id="s-tone" min="-6" max="6" value="0" step="0.5" />
+                <div class="tick-row"><span>−6 dB</span><output id="o-tone">flat</output><span>+6 dB</span></div>
+              </div>
+            </section>
 
-        <!-- EQ -->
-        <section class="panel module module-wide">
-          <div class="panel-head">
-            <h2>Equalizer</h2>
-            <label class="switch"><input type="checkbox" id="p-eq-on" /><span></span></label>
+            <section class="panel card">
+              <div class="card-head">
+                <span class="card-icon">📊</span>
+                <div>
+                  <h3>Even out the volume</h3>
+                  <p class="card-sub">Stops loud and quiet parts jumping around</p>
+                </div>
+              </div>
+              <label class="check-row">
+                <input type="checkbox" id="s-comp" />
+                <span>Smooth out volume changes within the track</span>
+              </label>
+              <label class="check-row">
+                <input type="checkbox" id="s-loud" checked />
+                <span>Match every track to the same volume</span>
+              </label>
+              <div class="field field-tight">
+                <label>Target volume <output id="o-lufs-simple">−14 LUFS</output></label>
+                <input type="range" id="s-lufs" min="-24" max="-8" value="-14" step="0.5" />
+                <p class="hint">−14 matches Spotify/YouTube. Lower = more dynamic.</p>
+              </div>
+            </section>
           </div>
-          <div class="eq-grid">
-            <div class="eq-band">
-              <input type="range" class="vert" id="p-eq-ls" min="-12" max="12" value="0" step="0.5" />
-              <output id="o-eq-ls">0</output>
-              <input type="number" id="p-eq-ls-f" value="120" min="30" max="500" step="10" />
-              <label>Low shelf</label>
-            </div>
-            <div class="eq-band">
-              <input type="range" class="vert" id="p-eq-p1" min="-12" max="12" value="0" step="0.5" />
-              <output id="o-eq-p1">0</output>
-              <input type="number" id="p-eq-p1-f" value="250" min="60" max="2000" step="10" />
-              <label>Peak 1</label>
-            </div>
-            <div class="eq-band">
-              <input type="range" class="vert" id="p-eq-p2" min="-12" max="12" value="0" step="0.5" />
-              <output id="o-eq-p2">0</output>
-              <input type="number" id="p-eq-p2-f" value="1000" min="200" max="8000" step="50" />
-              <label>Peak 2</label>
-            </div>
-            <div class="eq-band">
-              <input type="range" class="vert" id="p-eq-p3" min="-12" max="12" value="0" step="0.5" />
-              <output id="o-eq-p3">0</output>
-              <input type="number" id="p-eq-p3-f" value="4000" min="800" max="16000" step="100" />
-              <label>Peak 3</label>
-            </div>
-            <div class="eq-band">
-              <input type="range" class="vert" id="p-eq-hs" min="-12" max="12" value="0" step="0.5" />
-              <output id="o-eq-hs">0</output>
-              <input type="number" id="p-eq-hs-f" value="8000" min="2000" max="18000" step="100" />
-              <label>High shelf</label>
-            </div>
-          </div>
-          <p class="hint">Gain in dB per band; the number below each slider is its frequency in Hz.</p>
-        </section>
 
-        <!-- Compressor -->
-        <section class="panel module">
-          <div class="panel-head">
-            <h2>Compressor</h2>
-            <label class="switch"><input type="checkbox" id="p-comp-on" /><span></span></label>
-          </div>
-          <div class="field"><label>Threshold <output id="o-th">-18 dB</output></label>
-            <input type="range" id="p-th" min="-48" max="0" value="-18" step="1" /></div>
-          <div class="field"><label>Ratio <output id="o-ratio">2.5:1</output></label>
-            <input type="range" id="p-ratio" min="1" max="10" value="2.5" step="0.1" /></div>
-          <div class="field"><label>Attack <output id="o-att">15 ms</output></label>
-            <input type="range" id="p-att" min="1" max="100" value="15" step="1" /></div>
-          <div class="field"><label>Release <output id="o-rel">150 ms</output></label>
-            <input type="range" id="p-rel" min="20" max="800" value="150" step="5" /></div>
-          <div class="field"><label>Makeup <output id="o-mk">0 dB</output></label>
-            <input type="range" id="p-mk" min="0" max="18" value="0" step="0.5" /></div>
-          <div class="gr-meter"><label>GR</label><div class="meter"><div id="m-gr"></div></div></div>
-        </section>
-
-        <!-- Loudness -->
-        <section class="panel module">
-          <div class="panel-head">
-            <h2>Loudness <span class="chip">EBU R128</span></h2>
-            <label class="switch"><input type="checkbox" id="p-loud-on" checked /><span></span></label>
-          </div>
-          <div class="field">
-            <label>Target <output id="o-lufs">-14.0 LUFS</output></label>
-            <input type="range" id="p-lufs" min="-24" max="-8" value="-14" step="0.5" />
-          </div>
-          <p id="loud-info" class="hint">Every exported track lands at the same loudness — no more volume jumps between songs.</p>
-        </section>
-
-        <!-- Output -->
-        <section class="panel module">
-          <div class="panel-head"><h2>Output</h2></div>
-          <div class="field"><label>Trim <output id="o-trim">0 dB</output></label>
-            <input type="range" id="p-trim" min="-12" max="12" value="0" step="0.5" /></div>
-          <div class="field"><label>Limiter ceiling <output id="o-ceil">-1.0 dB</output></label>
-            <input type="range" id="p-ceil" min="-3" max="0" value="-1" step="0.1" /></div>
-          <div class="meters">
+          <div class="meter-strip panel">
             <div class="meter-row"><label>L</label><div class="meter"><div id="m-l"></div></div></div>
             <div class="meter-row"><label>R</label><div class="meter"><div id="m-r"></div></div></div>
+            <div class="meter-row"><label>GR</label><div class="meter"><div id="m-gr"></div></div></div>
+            <button id="btn-save-preset" class="btn btn-sm btn-ghost">Save these settings</button>
+            <button id="btn-load-preset" class="btn btn-sm btn-ghost">Load settings</button>
           </div>
-        </section>
+        </div>
+
+        <!-- ─────── advanced controls ─────── -->
+        <div id="modules" class="hidden">
+          <section class="panel module" data-module="denoise">
+            <div class="panel-head">
+              <h2>AI Denoise <span class="chip">neural · local</span></h2>
+            </div>
+            <div class="field">
+              <label>Amount <output id="o-denoise">0%</output></label>
+              <input type="range" id="p-denoise" min="0" max="100" value="0" step="1" />
+            </div>
+            <p class="hint">RNNoise runs on the whole track when it loads, so this slider is an instant blend.</p>
+          </section>
+
+          <section class="panel module">
+            <div class="panel-head">
+              <h2>Rumble Filter</h2>
+              <label class="switch"><input type="checkbox" id="p-hpf-on" checked /><span></span></label>
+            </div>
+            <div class="field">
+              <label>High-pass <output id="o-hpf">30 Hz</output></label>
+              <input type="range" id="p-hpf" min="20" max="200" value="30" step="1" />
+            </div>
+            <p class="hint">Cuts sub-bass rumble, mic thumps and mud.</p>
+          </section>
+
+          <section class="panel module module-wide">
+            <div class="panel-head">
+              <h2>Equalizer</h2>
+              <label class="switch"><input type="checkbox" id="p-eq-on" /><span></span></label>
+            </div>
+            <div class="eq-grid">
+              <div class="eq-band">
+                <input type="range" class="vert" id="p-eq-ls" min="-12" max="12" value="0" step="0.5" />
+                <output id="o-eq-ls">0</output>
+                <input type="number" id="p-eq-ls-f" value="120" min="30" max="500" step="10" />
+                <label>Low shelf</label>
+              </div>
+              <div class="eq-band">
+                <input type="range" class="vert" id="p-eq-p1" min="-12" max="12" value="0" step="0.5" />
+                <output id="o-eq-p1">0</output>
+                <input type="number" id="p-eq-p1-f" value="250" min="60" max="2000" step="10" />
+                <label>Peak 1</label>
+              </div>
+              <div class="eq-band">
+                <input type="range" class="vert" id="p-eq-p2" min="-12" max="12" value="0" step="0.5" />
+                <output id="o-eq-p2">0</output>
+                <input type="number" id="p-eq-p2-f" value="1000" min="200" max="8000" step="50" />
+                <label>Peak 2</label>
+              </div>
+              <div class="eq-band">
+                <input type="range" class="vert" id="p-eq-p3" min="-12" max="12" value="0" step="0.5" />
+                <output id="o-eq-p3">0</output>
+                <input type="number" id="p-eq-p3-f" value="4000" min="800" max="16000" step="100" />
+                <label>Peak 3</label>
+              </div>
+              <div class="eq-band">
+                <input type="range" class="vert" id="p-eq-hs" min="-12" max="12" value="0" step="0.5" />
+                <output id="o-eq-hs">0</output>
+                <input type="number" id="p-eq-hs-f" value="8000" min="2000" max="18000" step="100" />
+                <label>High shelf</label>
+              </div>
+            </div>
+            <p class="hint">Gain in dB per band; the number below each slider is its frequency in Hz.</p>
+          </section>
+
+          <section class="panel module">
+            <div class="panel-head">
+              <h2>Compressor</h2>
+              <label class="switch"><input type="checkbox" id="p-comp-on" /><span></span></label>
+            </div>
+            <div class="field"><label>Threshold <output id="o-th">−18 dB</output></label>
+              <input type="range" id="p-th" min="-48" max="0" value="-18" step="1" /></div>
+            <div class="field"><label>Ratio <output id="o-ratio">2.5:1</output></label>
+              <input type="range" id="p-ratio" min="1" max="10" value="2.5" step="0.1" /></div>
+            <div class="field"><label>Attack <output id="o-att">15 ms</output></label>
+              <input type="range" id="p-att" min="1" max="100" value="15" step="1" /></div>
+            <div class="field"><label>Release <output id="o-rel">150 ms</output></label>
+              <input type="range" id="p-rel" min="20" max="800" value="150" step="5" /></div>
+            <div class="field"><label>Makeup <output id="o-mk">0 dB</output></label>
+              <input type="range" id="p-mk" min="0" max="18" value="0" step="0.5" /></div>
+          </section>
+
+          <section class="panel module">
+            <div class="panel-head">
+              <h2>Loudness <span class="chip">EBU R128</span></h2>
+              <label class="switch"><input type="checkbox" id="p-loud-on" checked /><span></span></label>
+            </div>
+            <div class="field">
+              <label>Target <output id="o-lufs">−14.0 LUFS</output></label>
+              <input type="range" id="p-lufs" min="-24" max="-8" value="-14" step="0.5" />
+            </div>
+            <p id="loud-info" class="hint">Every exported track lands at the same loudness — no more volume jumps between songs.</p>
+          </section>
+
+          <section class="panel module">
+            <div class="panel-head"><h2>Output</h2></div>
+            <div class="field"><label>Trim <output id="o-trim">0 dB</output></label>
+              <input type="range" id="p-trim" min="-12" max="12" value="0" step="0.5" /></div>
+            <div class="field"><label>Limiter ceiling <output id="o-ceil">−1.0 dB</output></label>
+              <input type="range" id="p-ceil" min="-3" max="0" value="-1" step="0.1" /></div>
+            <div class="meters">
+              <div class="meter-row"><label>L</label><div class="meter"><div id="m-l-adv"></div></div></div>
+              <div class="meter-row"><label>R</label><div class="meter"><div id="m-r-adv"></div></div></div>
+              <div class="meter-row"><label>GR</label><div class="meter"><div id="m-gr-adv"></div></div></div>
+            </div>
+            <div class="row" style="margin-top:10px">
+              <button id="btn-save-preset-adv" class="btn btn-sm btn-ghost" style="flex:1">Save settings</button>
+              <button id="btn-load-preset-adv" class="btn btn-sm btn-ghost" style="flex:1">Load</button>
+            </div>
+          </section>
+        </div>
       </div>
     </section>
   </main>
 
-  <footer id="statusbar"><span id="status-msg">Ready. Add tracks to begin.</span></footer>
+  <footer id="statusbar"><span id="status-msg">Ready — add some music to begin.</span></footer>
+
+  <!-- ══════════════════════ name / rename modal ══════════════════════ -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="modal-title">Name this profile</h3>
+      <p id="modal-sub" class="hint">Give it a name you'll recognise later — like “Dad's band — studio” or “My vocals 2019”.</p>
+      <input type="text" id="modal-input" maxlength="60" placeholder="e.g. Dad's band — studio takes" />
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn btn-ghost">Cancel</button>
+        <button id="modal-ok" class="btn btn-accent">Save name</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════ help sheet ══════════════════════ -->
+  <div id="help-overlay" class="modal-overlay hidden">
+    <div class="modal modal-wide">
+      <h3>What everything does</h3>
+      <div class="help-grid">
+        <div><b>✨ Fix it for me</b><p>Listens to the track — how noisy it is, whether it's muffled or boomy, whether the volume jumps — and sets everything for you. Always start here.</p></div>
+        <div><b>Remove noise &amp; hiss</b><p>An AI noise remover running on your own PC. Great on hiss and background noise. Too much makes music sound underwater.</p></div>
+        <div><b>Tone</b><p>One knob from warmer (more bass) to brighter (more treble). Muffled recordings want brighter; harsh ones want warmer.</p></div>
+        <div><b>Even out the volume</b><p>Two things: smoothing loud/quiet swings inside a track, and matching every track on the album to the same volume so nothing jumps.</p></div>
+        <div><b>Target sound (step 2)</b><p>Feed it good-sounding songs and ClearWave learns their tone, then steers your remasters toward it. Perfect for matching rough recordings to your studio ones.</p></div>
+        <div><b>A / B</b><p>Instantly hear the untouched original. Use it often — ears adjust fast and you may be doing more than you think.</p></div>
+        <div><b>Extra AI cleanup</b><p>Optional tools you install separately: stronger denoise, audience-noise removal, and vocal rescue. Green badges mean they're ready.</p></div>
+        <div><b>Advanced mode</b><p>Opens the full studio controls — EQ bands, compressor timings, limiter ceiling — when you want fine control.</p></div>
+      </div>
+      <div class="modal-actions">
+        <button id="help-close" class="btn btn-accent">Got it</button>
+      </div>
+    </div>
+  </div>
 
   <script src="main.js"></script>
 </body>
