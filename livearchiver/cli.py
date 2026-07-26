@@ -84,6 +84,12 @@ def cmd_split(args) -> int:
         print(f"  {i:02d}. [{audio_mod._hms(t['start'] or 0)}] {t['title']}")
     print(f"\n(tracklist saved to {args.show_dir / 'audio' / 'tracks.json'} — "
           f"edit it and re-run to fix names or cut points)")
+    if res.get("warnings"):
+        print("\nthe tracklist didn't match the audio:")
+        for w in res["warnings"]:
+            print(f"  ! {w}")
+        print("  use the timeline editor in the desktop app to place the cuts "
+              "by hand")
     if not args.dry_run:
         print(f"\ndone: {len(res['files'])} tagged FLAC tracks in "
               f"{args.show_dir / 'audio'}")

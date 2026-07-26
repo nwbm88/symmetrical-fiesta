@@ -62,6 +62,14 @@ def split_show(show_dir: Path, setlist_key: Optional[str] = None,
         tracks_path.parent.mkdir(exist_ok=True)
         tracks_path.write_text(json.dumps(tracks, indent=2, ensure_ascii=False))
 
+    # The tracklist and the audio can disagree — a setlist posted in the
+    # comments may belong to a longer upload of the same show.  Reconcile
+    # before cutting so we never half-write a track set.
+    tracks, warnings = audio_mod.sanitize_tracks(tracks, total)
+    for w in warnings:
+        log.warning("tracklist: %s", w)
+        notify(None, f"tracklist warning: {w}")
+
     files: list[Path] = []
     if cut:
         def on_track(i, n, title):
@@ -70,7 +78,7 @@ def split_show(show_dir: Path, setlist_key: Optional[str] = None,
                                      artist=manifest.get("artist") or "Unknown Artist",
                                      progress=on_track)
 
-    return {"tracks": tracks, "strategy": strategy,
+    return {"tracks": tracks, "strategy": strategy, "warnings": warnings,
             "files": [str(f) for f in files], "master": str(master)}
 
 

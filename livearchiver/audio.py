@@ -111,6 +111,42 @@ def _safe(name: str) -> str:
     return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")[:100]
 
 
+MIN_TRACK_LEN = 0.5
+# Tracklists are written to the nearest second and durations are estimated
+# from frame counts, so a sub-second overshoot is rounding, not a mismatch.
+END_TOLERANCE = 1.5
+
+
+def sanitize_tracks(tracks: list[dict], total: float) -> tuple[list[dict], list[str]]:
+    """Clamp track boundaries to the real audio length and drop the ones that
+    can't exist.
+
+    A tracklist can easily disagree with the audio: a setlist posted in the
+    comments may come from a different (longer) upload of the same show, a
+    hand-edited tracks.json can have a typo, or the source video may be cut
+    short.  Without this, ffmpeg is handed a start past the end of the file
+    and dies halfway through the split, leaving a partial track set behind.
+    """
+    clean, warnings = [], []
+    for i, t in enumerate(tracks, 1):
+        start = float(t.get("start") or 0.0)
+        end = float(t["end"]) if t.get("end") else total
+        title = t.get("title") or f"Track {i:02d}"
+        if start >= total:
+            warnings.append(f"{title!r} starts at {_hms(start)}, past the end "
+                            f"of the audio ({_hms(total)}) — skipped")
+            continue
+        clamped_end = min(end, total)
+        if end - total > END_TOLERANCE:
+            warnings.append(f"{title!r} ends at {_hms(end)}, past the end of "
+                            f"the audio — trimmed to {_hms(total)}")
+        if clamped_end - start < MIN_TRACK_LEN:
+            warnings.append(f"{title!r} is shorter than {MIN_TRACK_LEN}s — skipped")
+            continue
+        clean.append({**t, "title": title, "start": start, "end": clamped_end})
+    return clean, warnings
+
+
 def cut_tracks(master: Path, tracks: list[dict], show: dict,
                artist: str = "Unknown Artist",
                album: Optional[str] = None, progress=None) -> list[Path]:
@@ -118,12 +154,19 @@ def cut_tracks(master: Path, tracks: list[dict], show: dict,
     album = album or " - ".join(x for x in (show.get("date"), show.get("venue")) if x) \
         or "Live"
     out_dir = master.parent
+    tracks, warnings = sanitize_tracks(tracks, total)
+    for w in warnings:
+        log.warning("tracklist: %s", w)
+    if not tracks:
+        raise RuntimeError("no usable tracks after checking the tracklist "
+                           "against the audio length — use the timeline "
+                           "editor to place the cuts by hand")
+
     written = []
     for i, t in enumerate(tracks, 1):
         if progress:
             progress(i, len(tracks), t["title"])
-        start = t["start"] or 0.0
-        end = t["end"] if t.get("end") else total
+        start, end = t["start"], t["end"]
         out = out_dir / f"{i:02d} - {_safe(t['title'])}.flac"
         cmd = ["ffmpeg", "-nostdin", "-y", "-i", str(master),
                "-ss", f"{start:.3f}", "-to", f"{end:.3f}",

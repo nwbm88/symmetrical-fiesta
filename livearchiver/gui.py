@@ -105,9 +105,15 @@ class JobWorker(QThread):
                                      setlist_key=job.payload.get("setlist_key") or None,
                                      redetect=job.payload.get("redetect", False),
                                      progress=prog)
-                    self.job_finished.emit(
-                        job.id, True,
-                        f"{len(res['files'])} tracks via {res['strategy']}", res)
+                    msg = f"{len(res['files'])} tracks via {res['strategy']}"
+                    if res.get("warnings"):
+                        msg += f" ({len(res['warnings'])} tracklist warning(s))"
+                    self.job_finished.emit(job.id, True, msg, res)
+                elif job.kind == "extract":
+                    res = split_show(Path(job.payload["show_dir"]),
+                                     cut=False, progress=prog)
+                    self.job_finished.emit(job.id, True,
+                                           "audio master extracted", res)
             except Exception as e:
                 self.job_finished.emit(job.id, False, str(e), None)
 
@@ -556,6 +562,11 @@ class MainWindow(QMainWindow):
         b_resplit.setToolTip("Throw away tracks.json and detect the tracklist "
                              "again (after fixing chapters/setlist issues).")
         b_resplit.clicked.connect(lambda: self.queue_split(redetect=True))
+        b_timeline = QPushButton("Timeline editor ...")
+        b_timeline.setToolTip("See the whole show as a waveform and place the "
+                              "song cuts by eye/ear — for when automation "
+                              "can't work out the tracklist.")
+        b_timeline.clicked.connect(self.open_timeline)
         b_resolve = QPushButton("Find details in page text ...")
         b_resolve.setToolTip("Read the description and comments yourself and "
                              "point the archiver at the date, place, or a "
@@ -565,7 +576,7 @@ class MainWindow(QMainWindow):
         b_edit.clicked.connect(self.edit_show)
         b_open = QPushButton("Open folder")
         b_open.clicked.connect(self.open_show_folder)
-        for b in (self.b_split, b_resplit, b_resolve, b_edit, b_open):
+        for b in (self.b_split, b_resplit, b_timeline, b_resolve, b_edit, b_open):
             btns.addWidget(b)
         btns.addStretch(1)
         rlay.addLayout(btns)
@@ -668,6 +679,30 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         self._apply_show_values(s, dlg.values())
+
+    def open_timeline(self):
+        s = self._current_show()
+        if not s:
+            return
+        if not s["has_master"]:
+            r = QMessageBox.question(
+                self, "Extract audio first",
+                "The timeline needs the extracted audio master "
+                "(audio/full.flac), which this show doesn't have yet.\n\n"
+                "Queue the extraction now? Re-open the timeline once it "
+                "finishes.")
+            if r == QMessageBox.Yes:
+                self._enqueue(Job("extract", f"extract: {s['dir'].name[:60]}",
+                                  {"show_dir": str(s["dir"])}))
+            return
+        from .timeline import TimelineDialog
+        dlg = TimelineDialog(s["dir"], self)
+        if dlg.exec() == QDialog.Accepted:
+            self.statusBar().showMessage(
+                f"Tracklist saved ({len(dlg.segments())} tracks).")
+            if dlg.split_requested:
+                self.queue_split()
+            self.refresh_collection()
 
     def resolve_text(self):
         s = self._current_show()
@@ -785,6 +820,13 @@ class MainWindow(QMainWindow):
             if not ok:
                 QMessageBox.warning(self, "Job failed",
                                     f"{job.label}\n\n{msg}")
+            elif result and result.get("warnings"):
+                QMessageBox.information(
+                    self, "Tracklist didn't match the audio",
+                    "The tracklist disagreed with the actual recording:\n\n"
+                    + "\n".join(f"• {w}" for w in result["warnings"])
+                    + "\n\nThe cuts that made sense were written. Use the "
+                      "timeline editor to place the rest by hand.")
         self.statusBar().showMessage(msg)
         self.refresh_tree()
         self.refresh_collection()

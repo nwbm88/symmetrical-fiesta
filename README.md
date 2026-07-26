@@ -71,6 +71,45 @@ right piece and click *Use selection as date*, *Use selection as place*, or
 re-split. Nothing is ever lost: tracks are always cut from the extracted
 master, so re-splitting is cheap and repeatable.
 
+## Timeline editor — when automation can't do it
+
+Some shows have no chapters, no tracklist anywhere, and a crowd too loud for
+silence detection. For those, **"Timeline editor"** in the Collection tab
+opens the whole concert as a waveform, Audacity/Premiere style, and you cut
+it by eye and ear:
+
+```
+double-click   add a cut marker        drag a marker   move it
+right-click    delete a marker         click           seek / play from there
+Ctrl+wheel     zoom                    wheel           pan
+```
+
+The table below the waveform lists the resulting songs with start, end and
+length — double-click a title to name it, click a row to jump the playhead
+there. **Detect silences** seeds candidate markers from the quiet gaps so you
+start from a rough cut rather than nothing, then drag the ones that landed
+wrong and delete the ones that aren't song boundaries. *Save tracklist*
+writes the same `audio/tracks.json` the splitter uses, so *Save & queue split*
+cuts exactly what you drew.
+
+**Boost quiet audio** (on by default) scales the waveform display up to its
+loudest peak. Audience recordings are often very quiet — at true scale they
+draw as a flat line you can't read boundaries off. This affects the display
+only; the audio itself is never touched.
+
+The waveform is decoded once with ffmpeg and cached (`audio/peaks.json`), so
+re-opening a long show is instant.
+
+### When the tracklist disagrees with the audio
+
+A setlist posted in the comments sometimes belongs to a *different, longer*
+upload of the same show. Before cutting, every tracklist is checked against
+the real audio length: segments past the end are dropped and overshooting
+ends are trimmed, with a plain-language warning naming each affected song
+(both in the app and in `livearchiver split` output). The cuts that make
+sense are still written — the split never dies half-way leaving a partial
+track set behind.
+
 ## CLI
 
 Everything works headless too, with `--artist` on search:
