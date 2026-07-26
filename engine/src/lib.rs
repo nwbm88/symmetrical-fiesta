@@ -1,6 +1,7 @@
 //! ClearWave audio engine: decoding, restoration DSP, AI denoising,
 //! loudness normalization, offline rendering and real-time playback.
 
+pub mod analyze;
 pub mod decode;
 pub mod denoise;
 pub mod dsp;

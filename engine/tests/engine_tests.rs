@@ -217,6 +217,126 @@ fn preset_json_roundtrip() {
 }
 
 #[test]
+fn auto_mode_detects_hiss() {
+    // Music-like tone bursts over a constant hiss bed.
+    let rate = 48_000u32;
+    let mut audio = white_noise(rate, 8.0, 0.01); // hiss at ~-40 dB
+    let frames = audio.frames();
+    for i in 0..frames {
+        // 1 s on / 1 s off tone bursts to create quiet windows
+        let sec = i / rate as usize;
+        if sec % 2 == 0 {
+            let s = 0.4 * (2.0 * PI * 440.0 * i as f32 / rate as f32).sin();
+            audio.samples[i * 2] += s;
+            audio.samples[i * 2 + 1] += s;
+        }
+    }
+    let wet = denoise::denoise(&audio).unwrap();
+    let report = clearwave_engine::analyze::auto_preset(
+        rate,
+        &audio.samples,
+        Some(&wet.samples),
+        &Preset::default(),
+    );
+    assert!(
+        report.preset.denoise_amount >= 0.2,
+        "hissy track should get denoise, got {}",
+        report.preset.denoise_amount
+    );
+    assert!(!report.notes.is_empty());
+}
+
+#[test]
+fn auto_mode_leaves_clean_audio_alone() {
+    // Clean tone bursts over a barely-there -70 dB room tone: the noise
+    // floor is inaudible, so auto mode should keep denoise near zero.
+    let rate = 48_000u32;
+    let mut audio = white_noise(rate, 8.0, 0.0003);
+    let frames = audio.frames();
+    for i in 0..frames {
+        let sec = i / rate as usize;
+        if sec % 2 == 0 {
+            let s = 0.4 * (2.0 * PI * 440.0 * i as f32 / rate as f32).sin();
+            audio.samples[i * 2] += s;
+            audio.samples[i * 2 + 1] += s;
+        }
+    }
+    let wet = denoise::denoise(&audio).unwrap();
+    let report = clearwave_engine::analyze::auto_preset(
+        rate,
+        &audio.samples,
+        Some(&wet.samples),
+        &Preset::default(),
+    );
+    assert!(
+        report.preset.denoise_amount <= 0.2,
+        "clean track should get little/no denoise, got {}",
+        report.preset.denoise_amount
+    );
+}
+
+#[test]
+fn auto_mode_detects_muffled_audio() {
+    // White noise low-passed hard at 1 kHz = "muffled" spectrum.
+    let rate = 48_000u32;
+    let mut audio = white_noise(rate, 6.0, 0.2);
+    let coeffs = clearwave_engine::dsp::BiquadCoeffs::lowpass(rate as f32, 1000.0, 0.707);
+    for _ in 0..2 {
+        let mut fl = clearwave_engine::dsp::Biquad::with_coeffs(coeffs);
+        let mut fr = clearwave_engine::dsp::Biquad::with_coeffs(coeffs);
+        for f in audio.samples.chunks_exact_mut(2) {
+            f[0] = fl.process(f[0]);
+            f[1] = fr.process(f[1]);
+        }
+    }
+    let report = clearwave_engine::analyze::auto_preset(
+        rate,
+        &audio.samples,
+        None,
+        &Preset::default(),
+    );
+    assert!(report.preset.eq_enabled, "muffled track should enable EQ");
+    assert!(
+        report.preset.high_shelf_gain_db >= 1.0,
+        "muffled track should get a high-shelf boost, got {}",
+        report.preset.high_shelf_gain_db
+    );
+}
+
+#[test]
+fn auto_mode_detects_wild_dynamics() {
+    // Realistic shape: loud passages, much quieter passages, and true
+    // near-silent gaps (room tone) that establish the noise floor.
+    let rate = 48_000u32;
+    let mut audio = white_noise(rate, 16.0, 0.0005); // -66 dB bed
+    let frames = audio.frames();
+    for i in 0..frames {
+        let sec = i / rate as usize;
+        let amp = match sec % 4 {
+            0 | 1 => 0.7,  // loud section
+            2 => 0.035,    // quiet section (~-26 dB below loud)
+            _ => 0.0,      // gap: bed only
+        };
+        if amp > 0.0 {
+            let s = amp * (2.0 * PI * 300.0 * i as f32 / rate as f32).sin();
+            audio.samples[i * 2] += s;
+            audio.samples[i * 2 + 1] += s;
+        }
+    }
+    let report = clearwave_engine::analyze::auto_preset(
+        rate,
+        &audio.samples,
+        None,
+        &Preset::default(),
+    );
+    assert!(
+        report.preset.comp_enabled,
+        "wildly dynamic track should enable the compressor (spread {})",
+        report.dynamic_spread_db
+    );
+}
+
+#[test]
 fn waveform_peaks_shape() {
     let audio = sine(44_100, 440.0, 1.0, 0.5);
     let peaks = waveform::peaks(&audio, 500);

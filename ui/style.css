@@ -297,6 +297,18 @@ input[type="range"].vert::-webkit-slider-thumb { margin-top: 0; margin-left: -5p
   background: var(--bg-panel-2);
   cursor: crosshair;
 }
+.auto-notes {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(77, 215, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(77, 215, 255, 0.05);
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text);
+}
+.auto-notes b { color: var(--accent); }
+
 #load-overlay {
   position: absolute;
   inset: 0;

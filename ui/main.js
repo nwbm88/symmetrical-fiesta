@@ -302,6 +302,27 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ------------------------------------------------ auto mode ---- */
+
+$("btn-auto").addEventListener("click", async () => {
+  if (currentIndex < 0) return setStatus("Load a track first.", "error");
+  setStatus("Analyzing noise floor, tonal balance and dynamics…");
+  $("btn-auto").disabled = true;
+  try {
+    const r = await invoke("auto_settings", { base: collectPreset() });
+    applyPresetToUI(r.preset);
+    const el = $("auto-notes");
+    el.innerHTML =
+      "<b>Auto analysis</b><br/>" + r.notes.map((n) => "• " + n).join("<br/>");
+    el.classList.remove("hidden");
+    setStatus("Auto settings applied — fine-tune to taste, and A/B against the original.", "ok");
+  } catch (e) {
+    setStatus(`Auto analysis failed: ${e}`, "error");
+  } finally {
+    $("btn-auto").disabled = false;
+  }
+});
+
 /* A/B: click toggles; hold-to-compare also works via mousedown/up */
 const abBtn = $("btn-bypass");
 let abState = false;

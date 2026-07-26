@@ -40,6 +40,37 @@ impl BiquadCoeffs {
         }
     }
 
+    pub fn lowpass(fs: f32, freq: f32, q: f32) -> Self {
+        let freq = freq.clamp(10.0, fs * 0.45);
+        let w0 = 2.0 * std::f32::consts::PI * freq / fs;
+        let (sin, cos) = w0.sin_cos();
+        let alpha = sin / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        Self {
+            b0: (1.0 - cos) / 2.0 / a0,
+            b1: (1.0 - cos) / a0,
+            b2: (1.0 - cos) / 2.0 / a0,
+            a1: -2.0 * cos / a0,
+            a2: (1.0 - alpha) / a0,
+        }
+    }
+
+    /// Constant 0 dB peak-gain bandpass (RBJ), used by the analyzer.
+    pub fn bandpass(fs: f32, freq: f32, q: f32) -> Self {
+        let freq = freq.clamp(10.0, fs * 0.45);
+        let w0 = 2.0 * std::f32::consts::PI * freq / fs;
+        let (sin, cos) = w0.sin_cos();
+        let alpha = sin / (2.0 * q.max(0.1));
+        let a0 = 1.0 + alpha;
+        Self {
+            b0: alpha / a0,
+            b1: 0.0,
+            b2: -alpha / a0,
+            a1: -2.0 * cos / a0,
+            a2: (1.0 - alpha) / a0,
+        }
+    }
+
     pub fn peaking(fs: f32, freq: f32, gain_db: f32, q: f32) -> Self {
         if gain_db.abs() < 0.01 {
             return Self::identity();
@@ -109,6 +140,13 @@ pub struct Biquad {
 }
 
 impl Biquad {
+    pub fn with_coeffs(c: BiquadCoeffs) -> Self {
+        Self {
+            c,
+            ..Default::default()
+        }
+    }
+
     #[inline]
     pub fn process(&mut self, x: f32) -> f32 {
         let y = self.c.b0 * x + self.z1;

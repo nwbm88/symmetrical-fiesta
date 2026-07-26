@@ -13,6 +13,10 @@ runs locally inside the app.
 
 ## Features
 
+- **✨ Auto mode** — one click analyzes the track (noise floor + SNR,
+  9-band spectral balance, dynamic spread) and sets every module with a
+  plain-English explanation of each decision. Use it as the starting point,
+  then fine-tune by ear.
 - **Live preview** — real-time DSP engine; every slider is heard instantly
   while the track plays. Press `Space` to play/pause, click the waveform to
   seek, and use **A/B Original** to compare against the untouched file.
@@ -50,8 +54,10 @@ tauri build
 
 1. **Get the best source first.** If the audio came from YouTube, rip with
    `yt-dlp -f bestaudio` — a better source beats any amount of repair.
-2. Add the album's tracks, open the most problematic one.
-3. While it plays: raise **AI Denoise** until the noise is gone (back it off
+2. Add the album's tracks, open the most problematic one, hit **✨ Auto
+   settings**, and listen to what it chose (the notes under the waveform
+   explain every decision).
+3. Then fine-tune while it plays: raise **AI Denoise** until the noise is gone (back it off
    if the music starts sounding underwater — 30–70% is the sweet spot).
 4. Set the **Rumble filter** around 30–60 Hz; use the **EQ** to fix tone
    (muffled → high shelf up; harsh → cut around 2–4 kHz; boomy → cut 150–300 Hz).
@@ -87,6 +93,26 @@ green badges in the title bar.
 
 All of this stays on your machine — for personal-use restoration of your own
 recordings there's no cloud upload and no service terms involved.
+
+**GPU note:** the app itself (including the built-in AI denoise) runs on CPU
+and uses negligible resources — no GPU settings needed. Of the external
+tools, only Demucs uses your GPU (CUDA), and any 6 GB+ card handles it.
+
+**Which denoiser when?** RNNoise (built in) is mild and safe: excellent on
+hiss and broadband noise, and it deliberately leaves anything speech-like
+(including crowd chatter) alone. DeepFilterNet is much stronger on tough
+noise. For wrecked recordings, Demucs stem separation is the nuclear option.
+
+## Headless testing
+
+The whole pipeline runs from the command line too:
+
+```bash
+cargo run --release -p clearwave-engine --example remaster -- input.mp3 out.wav
+```
+
+It prints the auto-analysis report (noise floor, SNR, band levels, chosen
+settings) and before/after loudness, peak and noise-floor measurements.
 
 ## Architecture
 

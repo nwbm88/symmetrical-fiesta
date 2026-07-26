@@ -231,6 +231,31 @@ fn get_status(state: State<'_, AppState>) -> Status {
 }
 
 #[tauri::command]
+async fn auto_settings(
+    base: Preset,
+    state: State<'_, AppState>,
+) -> Result<clearwave_engine::analyze::AutoReport, String> {
+    let track = state
+        .shared
+        .track
+        .read()
+        .unwrap()
+        .clone()
+        .ok_or("Load a track first")?;
+    let rate = state.engine_rate;
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        let wet = if track.wet.is_empty() { None } else { Some(track.wet.as_slice()) };
+        clearwave_engine::analyze::auto_preset(rate, &track.dry, wet, &base)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    // Push the suggested settings straight into the live engine.
+    refresh_auto_gain(&state, &report.preset);
+    state.shared.set_preset(report.preset.clone());
+    Ok(report)
+}
+
+#[tauri::command]
 fn save_preset(path: String, preset: Preset) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&preset).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
@@ -389,6 +414,7 @@ fn main() {
             set_bypass,
             set_params,
             get_status,
+            auto_settings,
             save_preset,
             load_preset,
             detect_tools,

@@ -92,12 +92,14 @@
             <span id="track-sub" class="hint"></span>
           </div>
           <div class="transport">
+            <button id="btn-auto" class="btn btn-accent" title="Analyze this track and set every module automatically — a starting point you can then fine-tune">✨ Auto settings</button>
             <span id="time-now" class="time">0:00.0</span>
             <button id="btn-play" class="btn btn-play" disabled>▶</button>
             <span id="time-total" class="time">0:00.0</span>
           </div>
         </div>
         <canvas id="waveform" height="140"></canvas>
+        <div id="auto-notes" class="auto-notes hidden"></div>
         <div id="load-overlay" class="hidden"><div class="spinner"></div><span id="load-msg">Decoding + AI analysis…</span></div>
       </section>
 
