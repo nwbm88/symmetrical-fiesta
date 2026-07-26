@@ -300,7 +300,17 @@ input[type="range"].vert::-webkit-slider-thumb { margin-top: 0; margin-left: -5.
 .tick-row output { color: var(--text); font-weight: 600; }
 
 /* ─────────── track list ─────────── */
-.track-list { list-style: none; max-height: 240px; overflow-y: auto; margin-top: 8px; }
+.list-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  margin-top: 4px;
+}
+.list-count { font-size: 11px; color: var(--text-dim); }
+.btn-xs { padding: 3px 8px; font-size: 11px; border-radius: 6px; }
+
+.track-list { list-style: none; max-height: 240px; overflow-y: auto; margin-top: 6px; }
 .track-list li {
   padding: 9px 11px;
   border-radius: 8px;
@@ -317,8 +327,30 @@ input[type="range"].vert::-webkit-slider-thumb { margin-top: 0; margin-left: -5.
 .track-list li.active { background: #16304a; border-color: rgba(77, 215, 255, 0.4); }
 .track-list li .tname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .track-list li .tstate { font-size: 11px; color: var(--text-dim); flex: 0 0 auto; }
-.track-list li .tstate.ok { color: var(--green); }
+.track-list li .tstate.ok, .track-list li .tstate.done { color: var(--green); }
 .track-list li .tstate.err { color: var(--red); }
+.track-list li .tstate.working { color: var(--accent); }
+
+.track-del {
+  flex: 0 0 auto;
+  width: 19px; height: 19px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s, color 0.12s;
+}
+.track-list li:hover .track-del { opacity: 1; }
+.track-del:hover { background: #52242c; color: #ffd9d9; }
+
+/* whole-window drop target */
+body.dragging #layout { outline: 2px dashed var(--accent); outline-offset: -8px; }
+body.dragging #sidebar { background: #10202f; }
 .track-list .empty-hint {
   display: block; /* not the flex row the real items use */
   cursor: default;

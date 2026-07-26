@@ -19,6 +19,44 @@ let lastStatus = null;
 let batchTotal = 0;
 let outDir = "";
 let advanced = false;
+let batchRunning = false;
+
+/* ── preferences remembered between sessions ── */
+const PREFS_KEY = "clearwave.prefs.v1";
+
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify({
+      outDir,
+      format: $("out-format").value,
+      advanced,
+      external: $("ai-external").value,
+      voiceCmd: $("ai-voice-cmd").value,
+      profile: refProfile,
+    }));
+  } catch { /* storage unavailable — not fatal */ }
+}
+
+function loadPrefs() {
+  let p;
+  try {
+    p = JSON.parse(localStorage.getItem(PREFS_KEY) || "null");
+  } catch { return; }
+  if (!p) return;
+  if (p.outDir) { outDir = p.outDir; $("out-dir").value = p.outDir; }
+  if (p.format) $("out-format").value = p.format;
+  if (p.external) { $("ai-external").value = p.external; syncExternalFields(); }
+  if (p.voiceCmd) $("ai-voice-cmd").value = p.voiceCmd;
+  if (p.profile && Array.isArray(p.profile.band_db) && p.profile.band_db.length) {
+    refProfile = p.profile;
+    $("p-match-on").checked = true;
+  }
+  if (p.advanced) setMode(true);
+}
+
+function setWindowTitle(name) {
+  document.title = name ? `${name} — ClearWave` : "ClearWave";
+}
 
 const AUDIO_EXTS = ["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "webm", "mkv", "mp4", "aiff", "alac", "caf"];
 
@@ -110,10 +148,12 @@ function pushParams() {
 
 function syncAdvancedFromSimple() {
   $("p-denoise").value = $("s-denoise").value;
+  // Tone drives the high shelf only: positive = brighter, negative = darker
+  // (i.e. warmer). It deliberately does not touch the low shelf, so tweaking
+  // Tone never wipes out a low-shelf move made by Auto or in Advanced.
   const tone = Number($("s-tone").value);
-  $("p-eq-on").checked = Math.abs(tone) > 0.01 || eqHasManualBands();
   $("p-eq-hs").value = tone;
-  $("p-eq-ls").value = -tone * 0.6;
+  $("p-eq-on").checked = Math.abs(tone) > 0.01 || eqHasOtherBands();
   $("p-comp-on").checked = $("s-comp").checked;
   $("p-loud-on").checked = $("s-loud").checked;
   $("p-lufs").value = $("s-lufs").value;
@@ -127,9 +167,11 @@ function syncSimpleFromAdvanced() {
   $("s-lufs").value = $("p-lufs").value;
 }
 
-/* True when a band other than the two shelves the tone knob drives is set. */
-function eqHasManualBands() {
-  return ["p-eq-p1", "p-eq-p2", "p-eq-p3"].some((id) => Math.abs(Number($(id).value)) > 0.01);
+/* True when any band other than the high shelf (the Tone knob) is in use, so
+   turning Tone back to flat doesn't silently disable the rest of the EQ. */
+function eqHasOtherBands() {
+  return ["p-eq-ls", "p-eq-p1", "p-eq-p2", "p-eq-p3"]
+    .some((id) => Math.abs(Number($(id).value)) > 0.01);
 }
 
 function refreshOutputs() {
@@ -285,38 +327,109 @@ $("modal-input").addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeModal(null);
 });
 
+// Clicking the dimmed backdrop cancels, like every other desktop dialog.
+$("modal-overlay").addEventListener("click", (e) => {
+  if (e.target === $("modal-overlay")) closeModal(null);
+});
+
 $("btn-help").addEventListener("click", () => $("help-overlay").classList.remove("hidden"));
 $("help-close").addEventListener("click", () => $("help-overlay").classList.add("hidden"));
 $("help-overlay").addEventListener("click", (e) => {
   if (e.target === $("help-overlay")) $("help-overlay").classList.add("hidden");
 });
 
+// Escape closes whichever overlay is open, wherever focus happens to be.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("help-overlay").classList.contains("hidden")) {
+    $("help-overlay").classList.add("hidden");
+  } else if (!$("modal-overlay").classList.contains("hidden")) {
+    closeModal(null);
+  }
+});
+
 /* ══════════════════════ tracks ══════════════════════ */
+
+const STATE_ICON = { ok: "✓", err: "!", working: "…", done: "✓" };
 
 function renderTrackList() {
   const ul = $("track-list");
   ul.innerHTML = "";
+  $("btn-clear-tracks").classList.toggle("hidden", !tracks.length);
+  $("track-count").textContent = tracks.length
+    ? `${tracks.length} track${tracks.length === 1 ? "" : "s"}`
+    : "";
+
   if (!tracks.length) {
     const li = document.createElement("li");
     li.className = "empty-hint";
-    li.innerHTML = "Nothing added yet.<br/>Click <b>Add music files</b> to start.";
+    li.innerHTML = "Nothing added yet.<br/>Click <b>Add music files</b>, or drop files here.";
     ul.appendChild(li);
     return;
   }
+
   tracks.forEach((t, i) => {
     const li = document.createElement("li");
     li.className = i === currentIndex ? "active" : "";
+
     const name = document.createElement("span");
     name.className = "tname";
     name.textContent = t.name;
-    name.title = t.path;
+    name.title = t.error ? `${t.path}\n\n${t.error}` : t.path;
+
     const state = document.createElement("span");
     state.className = `tstate ${t.state || ""}`;
-    state.textContent = t.state === "ok" ? "✓" : t.state === "err" ? "!" : "";
-    li.append(name, state);
+    state.textContent = STATE_ICON[t.state] || "";
+
+    const del = document.createElement("button");
+    del.className = "track-del";
+    del.textContent = "×";
+    del.title = "Remove from the list";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeTrack(i);
+    });
+
+    li.append(name, state, del);
     li.addEventListener("click", () => loadTrack(i));
     ul.appendChild(li);
   });
+}
+
+function removeTrack(i) {
+  if (batchRunning) return setStatus("Can't change the list while remastering.", "error");
+  tracks.splice(i, 1);
+  if (tracks.length === 0) {
+    currentIndex = -1;
+    currentInfo = null;
+    waveMin = [];
+    waveMax = [];
+    $("workspace").classList.add("hidden");
+    $("welcome").classList.remove("hidden");
+    setWindowTitle(null);
+  } else if (i === currentIndex) {
+    // Open the next track along (or the new last one).
+    const next = Math.min(i, tracks.length - 1);
+    currentIndex = -1;
+    loadTrack(next);
+  } else if (i < currentIndex) {
+    currentIndex -= 1;
+  }
+  renderTrackList();
+}
+
+function addPaths(paths) {
+  let added = 0;
+  for (const p of paths) {
+    const ext = p.split(".").pop().toLowerCase();
+    if (!AUDIO_EXTS.includes(ext)) continue;
+    if (tracks.some((t) => t.path === p)) continue;
+    tracks.push({ path: p, name: p.split(/[\\/]/).pop(), state: "" });
+    added += 1;
+  }
+  renderTrackList();
+  if (added && currentIndex < 0) loadTrack(0);
+  return added;
 }
 
 async function addTracks() {
@@ -326,14 +439,44 @@ async function addTracks() {
     filters: [{ name: "Audio", extensions: AUDIO_EXTS }],
   });
   if (!sel) return;
-  const paths = Array.isArray(sel) ? sel : [sel];
-  for (const p of paths) {
-    if (!tracks.some((t) => t.path === p)) {
-      tracks.push({ path: p, name: p.split(/[\\/]/).pop(), state: "" });
-    }
-  }
+  addPaths(Array.isArray(sel) ? sel : [sel]);
+}
+
+$("btn-clear-tracks").addEventListener("click", () => {
+  if (batchRunning) return setStatus("Can't change the list while remastering.", "error");
+  tracks.length = 0;
+  currentIndex = -1;
+  currentInfo = null;
+  waveMin = [];
+  waveMax = [];
+  $("workspace").classList.add("hidden");
+  $("welcome").classList.remove("hidden");
+  setWindowTitle(null);
   renderTrackList();
-  if (currentIndex < 0 && tracks.length) loadTrack(0);
+  setStatus("List cleared.");
+});
+
+/* Drag & drop real files onto the window (Tauri gives us real paths). */
+async function setupDragDrop() {
+  try {
+    const wv = window.__TAURI__?.webview?.getCurrentWebview?.();
+    if (!wv?.onDragDropEvent) return;
+    await wv.onDragDropEvent((ev) => {
+      const p = ev.payload;
+      if (p.type === "over") {
+        document.body.classList.add("dragging");
+      } else if (p.type === "drop") {
+        document.body.classList.remove("dragging");
+        const n = addPaths(p.paths || []);
+        setStatus(n ? `Added ${n} file${n === 1 ? "" : "s"}.` : "No audio files in that drop.",
+                  n ? "ok" : "error");
+      } else {
+        document.body.classList.remove("dragging");
+      }
+    });
+  } catch {
+    /* drag-drop unavailable — the Add button still works */
+  }
 }
 
 async function loadTrack(index) {
@@ -353,6 +496,7 @@ async function loadTrack(index) {
     waveMax = info.waveform_max;
     t.state = "ok";
     $("track-title").textContent = info.file_name;
+    setWindowTitle(info.file_name);
     $("track-sub").textContent =
       `${fmtTime(info.duration_seconds)} · ${info.source_rate} Hz · ` +
       `measured ${info.lufs_dry.toFixed(1)} LUFS` +
@@ -511,6 +655,7 @@ $("btn-build-profile").addEventListener("click", async () => {
     refProfile = await invoke("build_profile", { files, name });
     $("p-match-on").checked = true;
     showProfile();
+    savePrefs();
     await refreshMatchGains();
     setStatus(`“${refProfile.name}” is ready — your remasters now aim for that sound.`, "ok");
   } catch (e) {
@@ -530,6 +675,7 @@ $("btn-rename-profile").addEventListener("click", async () => {
   if (name === null) return;
   refProfile.name = name;
   showProfile();
+  savePrefs();
   setStatus(`Renamed to “${name}”.`, "ok");
 });
 
@@ -561,6 +707,7 @@ $("btn-load-profile").addEventListener("click", async () => {
     refProfile = await invoke("load_profile", { path });
     $("p-match-on").checked = true;
     showProfile();
+    savePrefs();
     await refreshMatchGains();
     setStatus(`“${refProfile.name || "Profile"}” loaded.`, "ok");
   } catch (e) {
@@ -573,6 +720,7 @@ $("btn-clear-profile").addEventListener("click", async () => {
   matchGains = [];
   $("p-match-on").checked = false;
   showProfile();
+  savePrefs();
   pushParams();
   setStatus("Target sound removed.");
 });
@@ -591,15 +739,23 @@ $("btn-out-dir").addEventListener("click", async () => {
   if (dir) {
     outDir = dir;
     $("out-dir").value = dir;
+    savePrefs();
   }
 });
 
-$("ai-external").addEventListener("change", () => {
+function syncExternalFields() {
   const mode = $("ai-external").value;
   $("ai-custom-cmd").classList.toggle("hidden", mode !== "custom");
   $("ai-custom-pick").classList.toggle("hidden", mode !== "custom");
   $("voice-fields").classList.toggle("hidden", mode !== "voice");
+}
+
+$("ai-external").addEventListener("change", () => {
+  syncExternalFields();
+  savePrefs();
 });
+$("ai-voice-cmd").addEventListener("change", savePrefs);
+$("out-format").addEventListener("change", savePrefs);
 
 function externalOptions() {
   const mode = $("ai-external").value;
@@ -631,6 +787,7 @@ function externalOptions() {
 }
 
 $("btn-export-one").addEventListener("click", async () => {
+  if (batchRunning) return;
   if (currentIndex < 0) return setStatus("Open a track first.", "error");
   const fmt = $("out-format").value;
   const stem = tracks[currentIndex].name.replace(/\.[^.]+$/, "");
@@ -659,12 +816,17 @@ $("btn-export-one").addEventListener("click", async () => {
 });
 
 $("btn-export-all").addEventListener("click", async () => {
+  if (batchRunning) return;
   if (!tracks.length) return setStatus("Add some music first.", "error");
   if (!outDir) return setStatus("Choose a folder to save into first.", "error");
+  batchRunning = true;
   batchTotal = tracks.length;
+  for (const t of tracks) { t.state = ""; t.error = null; }
+  renderTrackList();
   $("batch-progress").classList.remove("hidden");
   $("btn-cancel-batch").classList.remove("hidden");
   $("btn-export-all").disabled = true;
+  $("btn-export-one").disabled = true;
   $("batch-bar").style.width = "0%";
   $("batch-label").textContent = "Starting…";
   try {
@@ -677,8 +839,10 @@ $("btn-export-all").addEventListener("click", async () => {
       reference: $("p-match-on").checked ? refProfile : null,
     });
   } catch (e) {
+    batchRunning = false;
     setStatus(`Could not start: ${e}`, "error");
     $("btn-export-all").disabled = false;
+    $("btn-export-one").disabled = false;
     $("btn-cancel-batch").classList.add("hidden");
   }
 });
@@ -688,15 +852,35 @@ $("btn-cancel-batch").addEventListener("click", () => invoke("cancel_batch"));
 listen("batch-progress", (ev) => {
   const p = ev.payload;
   if (p.done) {
+    batchRunning = false;
     $("batch-bar").style.width = "100%";
-    $("batch-label").textContent = "All done.";
     $("btn-export-all").disabled = false;
+    $("btn-export-one").disabled = false;
     $("btn-cancel-batch").classList.add("hidden");
-    setStatus("✓ Album remastered — every track at the same volume, saved to your folder.", "ok");
+    const failed = tracks.filter((t) => t.state === "err").length;
+    $("batch-label").textContent = failed ? `Finished with ${failed} problem(s).` : "All done.";
+    setStatus(
+      failed
+        ? `Finished, but ${failed} track${failed === 1 ? "" : "s"} failed — hover them in the list for details.`
+        : "✓ Album remastered — every track at the same volume, saved to your folder.",
+      failed ? "error" : "ok"
+    );
+    renderTrackList();
     return;
   }
+
   const frac = batchTotal ? (p.index + (p.stage === "done" ? 1 : 0.5)) / batchTotal : 0;
   $("batch-bar").style.width = `${Math.round(frac * 100)}%`;
+
+  // Mirror progress onto the track list so you can see which one failed.
+  const t = tracks[p.index];
+  if (t) {
+    if (p.stage === "processing") { t.state = "working"; t.error = null; }
+    else if (p.stage === "done") { t.state = "done"; t.error = null; }
+    else if (p.stage === "error") { t.state = "err"; t.error = p.error; }
+    renderTrackList();
+  }
+
   if (p.stage === "processing") {
     $("batch-label").textContent = `(${p.index + 1} of ${p.total}) ${p.file}…`;
   } else if (p.stage === "error") {
@@ -715,9 +899,10 @@ function setMode(adv) {
   for (const el of document.querySelectorAll(".adv-only")) {
     el.classList.toggle("hidden", !adv);
   }
-  if (adv) syncSimpleFromAdvanced();
-  else syncSimpleFromAdvanced();
+  // Keep the simple controls showing whatever the engine actually has.
+  syncSimpleFromAdvanced();
   refreshOutputs();
+  savePrefs();
   drawWave(lastStatus && lastStatus.duration_seconds > 0
     ? lastStatus.position_seconds / lastStatus.duration_seconds : 0);
 }
@@ -774,9 +959,12 @@ window.addEventListener("resize", () =>
   drawWave(lastStatus && lastStatus.duration_seconds > 0
     ? lastStatus.position_seconds / lastStatus.duration_seconds : 0));
 
+loadPrefs();
 showProfile();
+syncExternalFields();
 refreshOutputs();
 drawWave(0);
 detectTools();
+setupDragDrop();
 invoke("set_params", { preset: collectPreset() }).catch(() => {});
 setInterval(pollStatus, 100);

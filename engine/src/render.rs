@@ -331,10 +331,12 @@ pub fn stem_rescue(audio: &AudioData, opts: &StemRescue, work_dir: &Path) -> Res
 
     let gv = 10f32.powf(opts.vocal_gain_db / 20.0);
     let gi = 10f32.powf(opts.instrumental_gain_db / 20.0);
-    let mut mix = vec![0f32; audio.samples.len()];
-    for i in 0..mix.len() {
-        mix[i] = vocal.samples[i] * gv + inst.samples[i] * gi;
-    }
+    let mix: Vec<f32> = vocal
+        .samples
+        .iter()
+        .zip(&inst.samples)
+        .map(|(v, i)| v * gv + i * gi)
+        .collect();
 
     let _ = std::fs::remove_file(&in_path);
     let _ = std::fs::remove_dir_all(&out_dir);

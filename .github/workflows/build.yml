@@ -18,10 +18,28 @@ jobs:
       - name: Run engine tests
         run: cargo test -p clearwave-engine --no-default-features --release
 
+  test-ui:
+    name: UI smoke tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        working-directory: ui-tests
+        run: npm install
+      - name: Install Chromium
+        working-directory: ui-tests
+        run: npx playwright install --with-deps chromium
+      - name: Run UI smoke tests
+        working-directory: ui-tests
+        run: npm test
+
   build-windows:
     name: Windows installer
     runs-on: windows-latest
-    needs: test-engine
+    needs: [test-engine, test-ui]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

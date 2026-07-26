@@ -45,6 +45,13 @@ runs locally inside the app.
 - **Brick-wall limiter** — nothing ever clips past the ceiling.
 - **Presets** — save your recipe as JSON, load it any time.
 - **Batch remaster** — add the whole album, pick an output folder, one click.
+  Progress is mirrored onto the track list, so a failed track is obvious
+  (hover it for the reason).
+- **Simple and Advanced modes** — Simple gives you plain-language controls
+  (Remove noise & hiss / Tone / Even out the volume); Advanced opens the full
+  EQ, compressor and limiter. Both drive the same engine.
+- **Drag and drop** files straight onto the window, and ClearWave remembers
+  your output folder, format, mode and target sound between sessions.
 - **Formats** — reads MP3/M4A/AAC/FLAC/WAV/OGG/Opus/WebM and more; exports
   24-bit WAV always, plus MP3/FLAC/M4A when `ffmpeg` is installed.
 
@@ -214,9 +221,15 @@ limiter pass — so the whole album lands at identical loudness.
 ## Development
 
 ```bash
-cargo test -p clearwave-engine --no-default-features   # engine tests
+cargo test -p clearwave-engine --no-default-features   # engine tests (18)
+cd ui-tests && npm install && npm test                 # UI smoke tests (11)
 tauri dev                                              # run the app
 ```
+
+The UI tests load the real front end in Chromium against a mock Tauri
+backend (`ui-tests/mock-tauri.js`) and drive the actual flows — adding and
+removing tracks, batch progress, the Simple ⇄ Advanced mapping, dialogs and
+saved preferences. Both suites run in CI before the Windows installer builds.
 
 ## License
 

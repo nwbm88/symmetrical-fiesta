@@ -277,14 +277,18 @@ fn load_preset(path: String) -> Result<Preset, String> {
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
+/// Probing these spawns real processes — `demucs --help` imports torch and
+/// can take several seconds — so it must not run on the UI thread.
 #[tauri::command]
-fn detect_tools() -> Tools {
-    Tools {
+async fn detect_tools() -> Result<Tools, String> {
+    tauri::async_runtime::spawn_blocking(|| Tools {
         ffmpeg: render::tool_available("ffmpeg", "-version"),
         deepfilter: render::tool_available("deep-filter", "--version"),
         demucs: render::tool_available("demucs", "--help"),
         uvr: render::tool_available("audio-separator", "--version"),
-    }
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
