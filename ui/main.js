@@ -126,6 +126,8 @@ function applyPresetToUI(p) {
   syncSimpleFromAdvanced();
   refreshOutputs();
   pushParams();
+  // Recompute matching for the track that's actually open.
+  refreshMatchGains();
 }
 
 /* Debounced parameter push so slider drags stay smooth. */
@@ -573,7 +575,10 @@ async function doSavePreset() {
   });
   if (!path) return;
   try {
-    await invoke("save_preset", { path, preset: collectPreset() });
+    // Matching gains are measured per track, so they must not be baked into
+    // a saved preset — they're recomputed from the profile on load instead.
+    const preset = { ...collectPreset(), match_gains: [] };
+    await invoke("save_preset", { path, preset });
     setStatus(`Settings saved: ${path}`, "ok");
   } catch (e) {
     setStatus(`Could not save settings: ${e}`, "error");
