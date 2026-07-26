@@ -112,13 +112,15 @@ def _safe(name: str) -> str:
 
 
 def cut_tracks(master: Path, tracks: list[dict], show: dict,
-               album: Optional[str] = None) -> list[Path]:
+               album: Optional[str] = None, progress=None) -> list[Path]:
     total = duration_of(master)
     album = album or " - ".join(x for x in (show.get("date"), show.get("venue")) if x) \
         or "Live"
     out_dir = master.parent
     written = []
     for i, t in enumerate(tracks, 1):
+        if progress:
+            progress(i, len(tracks), t["title"])
         start = t["start"] or 0.0
         end = t["end"] if t.get("end") else total
         out = out_dir / f"{i:02d} - {_safe(t['title'])}.flac"

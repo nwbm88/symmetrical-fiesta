@@ -11,7 +11,6 @@ Typical session:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -20,7 +19,7 @@ from . import catalog as cat_mod
 from . import sources
 from .download import download
 from . import audio as audio_mod
-from .tracks import resolve_tracks
+from .pipeline import split_show
 
 log = logging.getLogger("topsarchiver")
 
@@ -72,50 +71,33 @@ def cmd_download(args) -> int:
 
 
 def cmd_split(args) -> int:
-    show_dir = args.show_dir
-    manifest_path = show_dir / "show.json"
-    if not manifest_path.exists():
-        print(f"{manifest_path} not found — is this a show directory created by "
-              f"'topsarchiver download'?", file=sys.stderr)
+    try:
+        res = split_show(args.show_dir, setlist_key=args.setlist_key,
+                         noise=args.noise, min_silence=args.min_silence,
+                         redetect=args.redetect, cut=not args.dry_run)
+    except FileNotFoundError as e:
+        print(e, file=sys.stderr)
         return 1
-    manifest = json.loads(manifest_path.read_text())
-    show = manifest["show"]
 
-    master = audio_mod.extract_master(show_dir)
-    total = audio_mod.duration_of(master)
-
-    tracks_path = show_dir / "audio" / "tracks.json"
-    if tracks_path.exists() and not args.redetect:
-        tracks = json.loads(tracks_path.read_text())
-        strategy = "tracks.json (manual/previous)"
-    else:
-        tracks, strategy = resolve_tracks(manifest, setlist_key=args.setlist_key)
-        if tracks and tracks[0]["start"] is None:
-            # names came from setlist.fm — find cut points by silence
-            cuts = audio_mod.detect_silences(master, args.noise, args.min_silence)
-            tracks = audio_mod.fit_names_to_silences(
-                [t["title"] for t in tracks], cuts, total)
-            strategy += " + silence detection"
-        elif not tracks:
-            cuts = audio_mod.detect_silences(master, args.noise, args.min_silence)
-            bounds = [0.0] + cuts + [total]
-            tracks = [{"title": f"Track {i:02d}", "start": bounds[i - 1], "end": bounds[i]}
-                      for i in range(1, len(bounds))]
-            strategy = "silence detection only (generic names — rename in tracks.json)"
-        tracks_path.parent.mkdir(exist_ok=True)
-        tracks_path.write_text(json.dumps(tracks, indent=2, ensure_ascii=False))
-
-    print(f"\ntracklist via {strategy}:")
-    for i, t in enumerate(tracks, 1):
+    print(f"\ntracklist via {res['strategy']}:")
+    for i, t in enumerate(res["tracks"], 1):
         print(f"  {i:02d}. [{audio_mod._hms(t['start'] or 0)}] {t['title']}")
-    print(f"\n(tracklist saved to {tracks_path} — edit it and re-run to fix "
-          f"names or cut points)")
-
-    if args.dry_run:
-        return 0
-    audio_mod.cut_tracks(master, tracks, show)
-    print(f"\ndone: {len(tracks)} tagged FLAC tracks in {show_dir / 'audio'}")
+    print(f"\n(tracklist saved to {args.show_dir / 'audio' / 'tracks.json'} — "
+          f"edit it and re-run to fix names or cut points)")
+    if not args.dry_run:
+        print(f"\ndone: {len(res['files'])} tagged FLAC tracks in "
+              f"{args.show_dir / 'audio'}")
     return 0
+
+
+def cmd_gui(args) -> int:
+    try:
+        from .gui import run
+    except ImportError:
+        print("The desktop app needs PySide6 — install it with:\n"
+              "    pip install PySide6", file=sys.stderr)
+        return 1
+    return run()
 
 
 def main(argv=None) -> int:
@@ -172,6 +154,10 @@ def main(argv=None) -> int:
     p.add_argument("--redetect", action="store_true",
                    help="ignore an existing tracks.json and re-detect")
     p.set_defaults(fn=cmd_split)
+
+    p = sub.add_parser("gui", parents=[common],
+                       help="launch the desktop app (needs PySide6)")
+    p.set_defaults(fn=cmd_gui)
 
     args = ap.parse_args(argv)
     logging.basicConfig(

@@ -16,6 +16,34 @@ extracts the audio and cuts it into individually named, tagged FLAC tracks.
 Optional: a free [setlist.fm API key](https://api.setlist.fm/docs/1.0/index.html)
 for automatic track naming when a video has no chapters or timestamps.
 
+## Desktop app
+
+```
+topsarchiver gui        # or: topsarchiver-gui
+```
+
+A native Qt desktop app (no browser, no HTML) with three tabs:
+
+- **Get Music** — hit *Search sources* to query YouTube and archive.org in the
+  background (add an optional extra search of your own, e.g. a specific show).
+  Results appear grouped by show with every duplicate version side by side —
+  source, length, quality, views — with the suggested best version marked.
+  Filters: *Still to download* (what's missing from your collection), *only
+  shows with multiple versions*, and free-text. Select versions and *Queue
+  selected* — the **download queue runs strictly one at a time**, with a live
+  progress bar. *Ignore selected version* hides duplicates you've rejected.
+  Double-click any row to open the original page in your browser.
+- **Collection** — everything you have: each show with its date, place,
+  source link, uploader, the original description, and the track list with
+  split status (split / detected-but-not-cut / not extracted yet). Buttons to
+  *Extract & split tracks* (queued behind any running download, so only one
+  heavy job runs at once), *Re-detect & split*, *Edit date/venue* when the
+  automatic detection got it wrong, and *Open folder*.
+- **Settings** — collection folder, setlist.fm API key, audio-only mode.
+
+The GUI and CLI share the same `catalog.json` and collection folder — use
+whichever you like, they stay in sync.
+
 > Note: this tool is for personal archival use. Live recordings are still the
 > band's/rights-holders' property — keep the archive private and support the
 > band through official releases.

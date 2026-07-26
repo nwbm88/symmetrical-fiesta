@@ -37,14 +37,16 @@ def show_dir_name(rec: dict) -> str:
     return _safe(f"{date} - {venue}")
 
 
-def download(rec: dict, collection: Path, audio_only: bool = False) -> Path:
+def download(rec: dict, collection: Path, audio_only: bool = False,
+             progress=None) -> Path:
+    """progress: optional callable(fraction_or_None, message)."""
     dest = collection / show_dir_name(rec)
     dest.mkdir(parents=True, exist_ok=True)
 
     if rec["source"] == "youtube":
-        info = _download_youtube(rec, dest, audio_only)
+        info = _download_youtube(rec, dest, audio_only, progress)
     elif rec["source"] == "archive.org":
-        info = _download_archive_org(rec, dest, audio_only)
+        info = _download_archive_org(rec, dest, audio_only, progress)
     else:
         raise ValueError(f"unknown source {rec['source']}")
 
@@ -84,8 +86,21 @@ def download(rec: dict, collection: Path, audio_only: bool = False) -> Path:
 
 # ---------------------------------------------------------------- YouTube
 
-def _download_youtube(rec: dict, dest: Path, audio_only: bool) -> dict:
+def _download_youtube(rec: dict, dest: Path, audio_only: bool,
+                      progress=None) -> dict:
     from yt_dlp import YoutubeDL
+
+    def hook(d):
+        if not progress:
+            return
+        if d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            if total:
+                progress(d.get("downloaded_bytes", 0) / total,
+                         f"downloading {d.get('_percent_str', '').strip()} "
+                         f"{d.get('_speed_str', '').strip()}")
+        elif d.get("status") == "finished":
+            progress(None, "merging/processing ...")
 
     opts = {
         "outtmpl": str(dest / "source.%(ext)s"),
@@ -93,6 +108,7 @@ def _download_youtube(rec: dict, dest: Path, audio_only: bool) -> dict:
         "format": "bestaudio/best" if audio_only else "bestvideo+bestaudio/best",
         "merge_output_format": None if audio_only else "mkv",
         "noplaylist": True,
+        "progress_hooks": [hook],
     }
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(rec["url"], download=True)
@@ -115,7 +131,8 @@ AUDIO_EXTS = (".flac", ".wav", ".shn", ".mp3", ".ogg", ".m4a")
 VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".mpg", ".mpeg", ".mov")
 
 
-def _download_archive_org(rec: dict, dest: Path, audio_only: bool) -> dict:
+def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
+                          progress=None) -> dict:
     identifier = rec["id"].split(":", 1)[1]
     meta = requests.get(f"https://archive.org/metadata/{identifier}", timeout=30).json()
     files = meta.get("files", [])
@@ -124,6 +141,8 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool) -> dict:
     if not chosen:
         raise RuntimeError(f"no downloadable media files found in {identifier}")
 
+    total_bytes = sum(int(f.get("size", 0)) for f in chosen) or None
+    done_bytes = 0
     saved = []
     for f in chosen:
         url = f"https://archive.org/download/{identifier}/{f['name']}"
@@ -131,6 +150,7 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool) -> dict:
         if out.exists() and out.stat().st_size == int(f.get("size", -1)):
             log.info("already have %s", out.name)
             saved.append(out.name)
+            done_bytes += int(f.get("size", 0))
             continue
         log.info("downloading %s (%.1f MB)", f["name"], int(f.get("size", 0)) / 1e6)
         with requests.get(url, stream=True, timeout=60) as r:
@@ -138,6 +158,10 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool) -> dict:
             with open(out, "wb") as fh:
                 for chunk in r.iter_content(1 << 20):
                     fh.write(chunk)
+                    done_bytes += len(chunk)
+                    if progress and total_bytes:
+                        progress(min(done_bytes / total_bytes, 1.0),
+                                 f"downloading {Path(f['name']).name}")
         saved.append(out.name)
 
     md = meta.get("metadata", {})

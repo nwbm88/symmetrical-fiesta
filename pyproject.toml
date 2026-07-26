@@ -12,8 +12,12 @@ dependencies = [
     "requests>=2.31",
 ]
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.5"]
+
 [project.scripts]
 topsarchiver = "topsarchiver.cli:main"
+topsarchiver-gui = "topsarchiver.gui:main_standalone"
 
 [tool.setuptools.packages.find]
 include = ["topsarchiver*"]
