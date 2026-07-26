@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod pipeline;
+#[cfg(feature = "test-hooks")]
+mod test_hooks;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -465,6 +467,9 @@ fn main() {
                     (None, 48_000, false)
                 }
             };
+            #[cfg(feature = "test-hooks")]
+            test_hooks::maybe_inject_drop(app.handle().clone());
+
             app.manage(AppState {
                 shared,
                 engine_rate,

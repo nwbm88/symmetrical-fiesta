@@ -465,7 +465,9 @@ async function setupDragDrop() {
     if (!wv?.onDragDropEvent) return;
     await wv.onDragDropEvent((ev) => {
       const p = ev.payload;
-      if (p.type === "over") {
+      // Tauri emits enter → over(…) → drop | leave. 'enter' must light the
+      // drop target up too, otherwise it flickers off as the drag begins.
+      if (p.type === "enter" || p.type === "over") {
         document.body.classList.add("dragging");
       } else if (p.type === "drop") {
         document.body.classList.remove("dragging");

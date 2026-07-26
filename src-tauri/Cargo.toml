@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "ClearWave — restore and remaster rough recordings, locally"
 edition = "2021"
 
+[features]
+# Enables an env-gated hook that injects a synthetic drag-drop event, so the
+# real drag-and-drop path can be exercised headlessly. Never enabled in
+# release builds of the app.
+test-hooks = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -231,6 +231,20 @@ backend (`ui-tests/mock-tauri.js`) and drive the actual flows — adding and
 removing tracks, batch progress, the Simple ⇄ Advanced mapping, dialogs and
 saved preferences. Both suites run in CI before the Windows installer builds.
 
+### Verifying drag and drop headlessly
+
+Drag and drop needs a real webview, so it can't be covered by the Chromium
+suite. The `test-hooks` feature (never compiled into a shipping build) injects
+the same `tauri://drag-*` event sequence the OS emits:
+
+```bash
+cargo build -p clearwave --release --features test-hooks
+Xvfb :99 -screen 0 1400x900x24 &
+DISPLAY=:99 CLEARWAVE_TEST_DROP="/path/a.mp3,/path/b.mp3" \
+  ./target/release/clearwave
+DISPLAY=:99 import -window root shot.png
+```
+
 ## License
 
 Personal project. RNNoise/nnnoiseless (BSD-3), Symphonia (MPL-2.0),
