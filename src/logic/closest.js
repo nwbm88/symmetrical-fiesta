@@ -24,9 +24,11 @@ export async function closestAchievements(characterId, limit = 25) {
   const { rows } = await query(
     `SELECT p.collectible_id AS id, a.name, a.icon,
             p.current_amount, p.required_amount,
-            round(100.0 * p.current_amount / NULLIF(p.required_amount, 0), 1) AS percent
+            round(100.0 * p.current_amount / NULLIF(p.required_amount, 0), 1) AS percent,
+            (g.id IS NOT NULL) AS has_guide
        FROM character_progress p
        JOIN achievements a ON a.id = p.collectible_id
+       LEFT JOIN guides g ON g.collectible_type = 'achievement' AND g.collectible_id = p.collectible_id
       WHERE p.character_id = $1
         AND p.kind = 'achievement'
         AND p.completed = false

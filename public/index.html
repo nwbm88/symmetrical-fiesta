@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WoW Collection Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='4' y='4' width='8' height='8' rx='1.5' transform='rotate(45 8 8)' fill='%23eda100'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wordmark">
+      <span class="gem" aria-hidden="true"></span>
+      <span>Collection<b>Tracker</b></span>
+      <span id="demo-badge" class="badge" hidden>demo data</span>
+    </div>
+    <form id="lookup" class="lookup" autocomplete="off">
+      <select id="region" aria-label="Region">
+        <option value="us">US</option><option value="eu">EU</option>
+        <option value="kr">KR</option><option value="tw">TW</option>
+      </select>
+      <input id="realm" placeholder="Realm" required spellcheck="false">
+      <input id="name" placeholder="Character" required spellcheck="false">
+      <button type="submit">Track</button>
+    </form>
+  </header>
+
+  <main>
+    <section id="empty" class="empty">
+      <h1>Every mount. Every toy. Every achievement.</h1>
+      <p>Enter a character to see your progression, what you're closest to
+         finishing, and step-by-step guides with NPC locations — all served
+         from your own local database.</p>
+    </section>
+
+    <section id="dashboard" hidden>
+      <div class="char-head">
+        <h1 id="char-title"></h1>
+        <span id="char-sub" class="sub"></span>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <nav class="tabs" role="tablist" id="tabs">
+        <button role="tab" data-tab="closest" aria-selected="true">Closest to finishing</button>
+        <button role="tab" data-tab="mount" aria-selected="false">Missing mounts</button>
+        <button role="tab" data-tab="toy" aria-selected="false">Missing toys</button>
+      </nav>
+
+      <div id="panel-closest" class="panel"></div>
+      <div id="panel-mount" class="panel" hidden></div>
+      <div id="panel-toy" class="panel" hidden></div>
+    </section>
+  </main>
+
+  <dialog id="guide-modal">
+    <div class="modal-head">
+      <h2 id="guide-title"></h2>
+      <button id="guide-close" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <article id="guide-body" class="guide-text"></article>
+      <div id="guide-map"></div>
+    </div>
+    <p id="guide-attrib" class="attrib"></p>
+  </dialog>
+
+  <footer>
+    <p>Data: Blizzard Battle.net API · guide &amp; location data via
+      <a href="https://github.com/ATTWoWAddon/AllTheThings">All The Things</a> (MIT),
+      <a href="https://warcraft.wiki.gg">Warcraft Wiki</a> (CC BY-SA 4.0),
+      <a href="https://github.com/TrinityCore/TrinityCore">TrinityCore</a> (GPLv3).
+      Not affiliated with Blizzard Entertainment.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
