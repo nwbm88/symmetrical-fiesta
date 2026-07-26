@@ -12,6 +12,8 @@ const $ = (id) => document.getElementById(id);
 const tracks = []; // { path, name, state: ''|'ok'|'err' }
 let currentIndex = -1;
 let currentInfo = null; // TrackInfo from load_track
+let refProfile = null; // Profile built from studio tracks
+let matchGains = []; // per-track gains computed against refProfile
 let waveMin = [], waveMax = [];
 let statusTimer = null;
 let lastStatus = null;
@@ -51,6 +53,9 @@ function collectPreset() {
     target_lufs: Number($("p-lufs").value),
     output_gain_db: Number($("p-trim").value),
     limiter_ceiling_db: Number($("p-ceil").value),
+    match_enabled: $("p-match-on").checked && !!refProfile,
+    match_strength: Number($("p-match-strength").value) / 100,
+    match_gains: $("p-match-on").checked ? matchGains : [],
   };
 }
 
@@ -115,6 +120,7 @@ function refreshOutputs() {
   $("o-lufs").textContent = `${Number($("p-lufs").value).toFixed(1)} LUFS`;
   $("o-trim").textContent = `${$("p-trim").value} dB`;
   $("o-ceil").textContent = `${Number($("p-ceil").value).toFixed(1)} dB`;
+  $("o-match").textContent = `${$("p-match-strength").value}%`;
   updateLoudInfo();
 }
 
@@ -273,6 +279,8 @@ async function loadTrack(index) {
     $("btn-play").disabled = !info.playback_ok;
     updateLoudInfo();
     await invoke("set_params", { preset: collectPreset() });
+    // Matching gains are per-track: recompute against the new track.
+    await refreshMatchGains();
     setStatus(`Loaded ${info.file_name}. Tweak the modules while it plays — then remaster the whole album.`, "ok");
   } catch (e) {
     t.state = "err";
@@ -366,6 +374,99 @@ $("btn-load-preset").addEventListener("click", async () => {
   }
 });
 
+/* ------------------------------------------------ reference profile ---- */
+
+function profileInfoText() {
+  return refProfile
+    ? `Profile “${refProfile.name}” — built from ${refProfile.num_tracks} track(s).`
+    : "No profile loaded.";
+}
+
+async function refreshMatchGains() {
+  if (!refProfile || currentIndex < 0 || !$("p-match-on").checked) {
+    matchGains = [];
+    pushParams();
+    return;
+  }
+  try {
+    matchGains = await invoke("match_gains_current", {
+      reference: refProfile,
+      strength: Number($("p-match-strength").value) / 100,
+    });
+    pushParams();
+  } catch (e) {
+    setStatus(`Match failed: ${e}`, "error");
+  }
+}
+
+$("btn-build-profile").addEventListener("click", async () => {
+  const sel = await dialog.open({
+    multiple: true,
+    title: "Pick clean studio tracks to learn from (2–10 recommended)",
+    filters: [{ name: "Audio", extensions: AUDIO_EXTS }],
+  });
+  if (!sel) return;
+  const files = Array.isArray(sel) ? sel : [sel];
+  setStatus(`Fingerprinting ${files.length} reference track(s)…`);
+  $("btn-build-profile").disabled = true;
+  try {
+    refProfile = await invoke("build_profile", {
+      files,
+      name: `${files.length}-track reference`,
+    });
+    $("profile-info").textContent = profileInfoText();
+    $("btn-save-profile").disabled = false;
+    $("p-match-on").checked = true;
+    await refreshMatchGains();
+    setStatus("Reference profile ready — matching is live. A/B to hear it.", "ok");
+  } catch (e) {
+    setStatus(`Profile build failed: ${e}`, "error");
+  } finally {
+    $("btn-build-profile").disabled = false;
+  }
+});
+
+$("btn-save-profile").addEventListener("click", async () => {
+  if (!refProfile) return;
+  const path = await dialog.save({
+    title: "Save reference profile",
+    defaultPath: "clearwave-profile.json",
+    filters: [{ name: "ClearWave profile", extensions: ["json"] }],
+  });
+  if (!path) return;
+  try {
+    await invoke("save_profile", { path, reference: refProfile });
+    setStatus(`Profile saved: ${path}`, "ok");
+  } catch (e) {
+    setStatus(`Profile save failed: ${e}`, "error");
+  }
+});
+
+$("btn-load-profile").addEventListener("click", async () => {
+  const path = await dialog.open({
+    title: "Load reference profile",
+    multiple: false,
+    filters: [{ name: "ClearWave profile", extensions: ["json"] }],
+  });
+  if (!path) return;
+  try {
+    refProfile = await invoke("load_profile", { path });
+    $("profile-info").textContent = profileInfoText();
+    $("btn-save-profile").disabled = false;
+    await refreshMatchGains();
+    setStatus("Profile loaded.", "ok");
+  } catch (e) {
+    setStatus(`Profile load failed: ${e}`, "error");
+  }
+});
+
+$("p-match-on").addEventListener("input", refreshMatchGains);
+$("p-match-strength").addEventListener("input", () => {
+  refreshOutputs();
+  clearTimeout(window._matchTimer);
+  window._matchTimer = setTimeout(refreshMatchGains, 80);
+});
+
 /* ------------------------------------------------ export ---- */
 
 let outDir = "";
@@ -379,14 +480,29 @@ $("btn-out-dir").addEventListener("click", async () => {
 });
 
 $("ai-external").addEventListener("change", () => {
-  $("ai-custom-cmd").classList.toggle("hidden", $("ai-external").value !== "custom");
+  const custom = $("ai-external").value === "custom";
+  $("ai-custom-cmd").classList.toggle("hidden", !custom);
+  $("ai-custom-pick").classList.toggle("hidden", !custom);
 });
 
 function externalCmd() {
   const mode = $("ai-external").value;
-  if (mode === "deepfilter") return "deep-filter {in} -o {outdir}";
-  if (mode === "custom") return $("ai-custom-cmd").value.trim() || null;
-  return null;
+  if (mode === "deepfilter") {
+    return { cmd: "deep-filter {in} -o {outdir}", pick: null };
+  }
+  if (mode === "crowd") {
+    return {
+      cmd: "audio-separator {in} -m UVR-MDX-NET_Crowd_HQ_1.onnx --output_dir {outdir}",
+      pick: "no crowd",
+    };
+  }
+  if (mode === "custom") {
+    return {
+      cmd: $("ai-custom-cmd").value.trim() || null,
+      pick: $("ai-custom-pick").value.trim() || null,
+    };
+  }
+  return { cmd: null, pick: null };
 }
 
 $("btn-export-one").addEventListener("click", async () => {
@@ -402,11 +518,14 @@ $("btn-export-one").addEventListener("click", async () => {
   setStatus("Rendering… (two-pass loudness, this takes a moment)");
   $("btn-export-one").disabled = true;
   try {
+    const ext = externalCmd();
     const msg = await invoke("export_track", {
       outputPath: path,
       format: fmt,
       preset: collectPreset(),
-      externalCmd: externalCmd(),
+      externalCmd: ext.cmd,
+      externalPick: ext.pick,
+      reference: $("p-match-on").checked ? refProfile : null,
     });
     setStatus(msg, "ok");
   } catch (e) {
@@ -426,12 +545,15 @@ $("btn-export-all").addEventListener("click", async () => {
   $("batch-bar").style.width = "0%";
   $("batch-label").textContent = "Starting…";
   try {
+    const ext = externalCmd();
     await invoke("run_batch", {
       files: tracks.map((t) => t.path),
       outputDir: outDir,
       format: $("out-format").value,
       preset: collectPreset(),
-      externalCmd: externalCmd(),
+      externalCmd: ext.cmd,
+      externalPick: ext.pick,
+      reference: $("p-match-on").checked ? refProfile : null,
     });
   } catch (e) {
     setStatus(`Batch failed to start: ${e}`, "error");
@@ -474,7 +596,11 @@ async function detectTools() {
     const t = await invoke("detect_tools");
     $("tool-ffmpeg").classList.toggle("on", t.ffmpeg);
     $("tool-deepfilter").classList.toggle("on", t.deepfilter);
+    $("tool-uvr").classList.toggle("on", t.uvr);
     $("tool-demucs").classList.toggle("on", t.demucs);
+    $("tool-uvr").title = t.uvr
+      ? "audio-separator found — Crowd removal available under Deep clean"
+      : "audio-separator not found — `pip install \"audio-separator[gpu]\"` to enable AI crowd removal";
     $("tool-ffmpeg").title = t.ffmpeg
       ? "ffmpeg found — MP3/FLAC/M4A export enabled"
       : "ffmpeg not found — install it to export MP3/FLAC/M4A (WAV always works)";

@@ -42,7 +42,25 @@ fn main() -> anyhow::Result<()> {
 
     let base = clearwave_engine::preset::Preset::default();
     let t = Instant::now();
-    let report = analyze::auto_preset(48_000, &dry.samples, Some(&wet.samples), &base);
+    let mut report = analyze::auto_preset(48_000, &dry.samples, Some(&wet.samples), &base);
+
+    // Test hook: CLEARWAVE_REF=<file> builds a reference profile from that
+    // file and enables matching EQ, demonstrating the profile workflow.
+    if let Ok(ref_path) = std::env::var("CLEARWAVE_REF") {
+        use clearwave_engine::{dsp, profile};
+        let centers = dsp::match_centers();
+        let ref_audio = resample::resample(&decode::decode_file(ref_path.as_ref())?, 48_000)?;
+        let ref_bands = profile::measure_bands(48_000, &ref_audio.samples, &centers);
+        let prof = profile::profile_from_tracks("reference", &[ref_bands])?;
+        let track_bands = profile::measure_bands(48_000, &dry.samples, &centers);
+        let gains = profile::match_gains(&prof, &track_bands, 1.0)?;
+        println!("\nreference profile from {ref_path}");
+        for ((c, g), t) in centers.iter().zip(&gains).zip(&track_bands) {
+            println!("  {:>6.0} Hz  track {:>6.1} dB  match {:>+5.1} dB", c, t, g);
+        }
+        report.preset.match_enabled = true;
+        report.preset.match_gains = gains;
+    }
     println!("auto analysis: {:.1}s elapsed", t.elapsed().as_secs_f32());
     println!("\n=== AUTO REPORT ===");
     println!(

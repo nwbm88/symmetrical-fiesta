@@ -22,6 +22,7 @@
       <div class="tools" id="tool-badges" title="Optional external tools detected on this PC">
         <span class="tool-badge" id="tool-ffmpeg">ffmpeg</span>
         <span class="tool-badge" id="tool-deepfilter">DeepFilterNet</span>
+        <span class="tool-badge" id="tool-uvr">UVR</span>
         <span class="tool-badge" id="tool-demucs">Demucs</span>
       </div>
       <button id="btn-load-preset" class="btn">Load preset</button>
@@ -41,6 +42,26 @@
         <ul id="track-list" class="track-list">
           <li class="empty-hint">Add the tracks of your album here.<br/>Click one to open it in the editor.</li>
         </ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Reference profile <span class="chip">match</span></h2>
+          <label class="switch"><input type="checkbox" id="p-match-on" /><span></span></label>
+        </div>
+        <p class="hint" style="margin-top:0">Feed it clean studio tracks (same artist or a sound you love). ClearWave fingerprints their tonal balance and morphs every remaster toward it.</p>
+        <div class="export-buttons" style="margin-top:8px">
+          <button id="btn-build-profile" class="btn">Build from studio tracks…</button>
+          <div class="row">
+            <button id="btn-load-profile" class="btn btn-sm" style="flex:1">Load</button>
+            <button id="btn-save-profile" class="btn btn-sm" style="flex:1" disabled>Save</button>
+          </div>
+        </div>
+        <p id="profile-info" class="hint">No profile loaded.</p>
+        <div class="field">
+          <label>Strength <output id="o-match">100%</output></label>
+          <input type="range" id="p-match-strength" min="0" max="150" value="100" step="5" />
+        </div>
       </section>
 
       <section class="panel">
@@ -65,10 +86,12 @@
           <label>Deep clean (external AI, optional)</label>
           <select id="ai-external">
             <option value="">Off — use built-in AI denoise only</option>
-            <option value="deepfilter">DeepFilterNet (deep-filter)</option>
+            <option value="deepfilter">DeepFilterNet — strong denoise</option>
+            <option value="crowd">Crowd removal — UVR (audio-separator)</option>
             <option value="custom">Custom command…</option>
           </select>
           <input id="ai-custom-cmd" type="text" class="hidden" placeholder='mytool "{in}" -o "{out}"  (or {outdir})' />
+          <input id="ai-custom-pick" type="text" class="hidden" placeholder="pick output containing… (e.g. No Crowd)" />
           <p class="hint">Runs before the chain during export/batch. Everything stays on this PC.</p>
         </div>
         <div class="export-buttons">

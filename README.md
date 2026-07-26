@@ -17,6 +17,15 @@ runs locally inside the app.
   9-band spectral balance, dynamic spread) and sets every module with a
   plain-English explanation of each decision. Use it as the starting point,
   then fine-tune by ear.
+- **Reference profiles** — feed ClearWave a few clean studio tracks (any
+  artist whose sound you want, including your own band's good takes) and it
+  fingerprints their tonal balance into a 24-band profile. A matching EQ
+  then morphs every remaster toward that sound — live while you listen, and
+  recomputed per-track during batch so the whole album converges on the same
+  target. Profiles save/load as JSON.
+- **AI crowd removal** — one-click integration with UVR's dedicated
+  crowd-separation model via `audio-separator` (see below): strips audience
+  noise from live recordings before the rest of the chain runs.
 - **Live preview** — real-time DSP engine; every slider is heard instantly
   while the track plays. Press `Space` to play/pause, click the waveform to
   seek, and use **A/B Original** to compare against the untouched file.
@@ -78,8 +87,15 @@ green badges in the title bar.
 | Tool | What it does | Install |
 |------|--------------|---------|
 | [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | Stronger neural noise removal | download `deep-filter` binary onto your PATH |
+| [audio-separator](https://github.com/nomadkaraoke/python-audio-separator) (UVR models) | **Crowd removal**, vocal/instrument separation | `pip install "audio-separator[gpu]"` |
 | [Demucs](https://github.com/facebookresearch/demucs) | Splits a track into vocal/drums/bass/other stems | `pip install demucs` |
 | [ffmpeg](https://ffmpeg.org) | Enables MP3/FLAC/M4A export | `winget install ffmpeg` |
+
+**Crowd removal:** select *Deep clean → Crowd removal (UVR)*. This runs the
+`UVR-MDX-NET_Crowd_HQ_1` model (auto-downloaded on first use by
+audio-separator) and keeps the "No Crowd" stem. On an RTX 2060 Super this
+processes a few times faster than real time. Expect startlingly good results
+on steady crowd rumble/chatter; whistles right next to the taper are harder.
 
 - **DeepFilterNet**: select *Deep clean → DeepFilterNet* and it's used
   automatically during export.
@@ -101,7 +117,15 @@ tools, only Demucs uses your GPU (CUDA), and any 6 GB+ card handles it.
 **Which denoiser when?** RNNoise (built in) is mild and safe: excellent on
 hiss and broadband noise, and it deliberately leaves anything speech-like
 (including crowd chatter) alone. DeepFilterNet is much stronger on tough
-noise. For wrecked recordings, Demucs stem separation is the nuclear option.
+noise. For crowd noise use the UVR crowd model; for wrecked recordings,
+Demucs stem separation is the nuclear option.
+
+**Restoring your own recordings** (your band, family tapes): reference
+profiles work especially well here — build the profile from your best
+recordings and match the rough ones to them. For deeper restoration of
+material you own or have permission for, a stem workflow (separate vocals
+with audio-separator/Demucs → denoise and EQ the stems → remix) can be
+driven through the custom Deep clean command.
 
 ## Headless testing
 

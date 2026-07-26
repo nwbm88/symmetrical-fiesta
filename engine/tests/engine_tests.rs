@@ -108,6 +108,27 @@ fn render_hits_target_lufs() {
 }
 
 #[test]
+fn render_with_match_eq_still_hits_target_lufs() {
+    // Regression: the limiter pass must not re-apply the matching EQ after
+    // loudness measurement (that overshot the target by several dB).
+    let audio = white_noise(44_100, 3.0, 0.05);
+    let preset = Preset {
+        loudness_enabled: true,
+        target_lufs: -16.0,
+        hpf_enabled: false,
+        match_enabled: true,
+        match_gains: vec![3.0; clearwave_engine::dsp::MATCH_BANDS],
+        ..Default::default()
+    };
+    let out = render::render(&audio, None, &preset).unwrap();
+    let l = loudness::integrated_lufs(&out).unwrap();
+    assert!(
+        (l - (-16.0)).abs() < 1.0,
+        "rendered loudness {l} not at target -16 with match EQ active"
+    );
+}
+
+#[test]
 fn limiter_respects_ceiling() {
     let audio = sine(48_000, 200.0, 1.0, 0.9);
     let preset = Preset {
@@ -334,6 +355,97 @@ fn auto_mode_detects_wild_dynamics() {
         "wildly dynamic track should enable the compressor (spread {})",
         report.dynamic_spread_db
     );
+}
+
+#[test]
+fn profile_roundtrip_and_matching_moves_spectrum_toward_reference() {
+    use clearwave_engine::dsp::{match_centers, DspChain};
+    use clearwave_engine::profile;
+
+    let rate = 48_000u32;
+    let centers = match_centers();
+
+    // Reference: full-bandwidth noise. Track: same noise low-passed at 2 kHz
+    // (i.e. a muffled recording of the same "sound").
+    let reference = white_noise(rate, 6.0, 0.1);
+    let mut track = reference.clone();
+    let lp = clearwave_engine::dsp::BiquadCoeffs::lowpass(rate as f32, 2000.0, 0.707);
+    let mut fl = clearwave_engine::dsp::Biquad::with_coeffs(lp);
+    let mut fr = clearwave_engine::dsp::Biquad::with_coeffs(lp);
+    for f in track.samples.chunks_exact_mut(2) {
+        f[0] = fl.process(f[0]);
+        f[1] = fr.process(f[1]);
+    }
+
+    let ref_bands = profile::measure_bands(rate, &reference.samples, &centers);
+    let prof = profile::profile_from_tracks("test", &[ref_bands.clone()]).unwrap();
+
+    // JSON roundtrip
+    let back: profile::Profile =
+        serde_json::from_str(&serde_json::to_string(&prof).unwrap()).unwrap();
+    assert_eq!(prof, back);
+
+    let track_bands = profile::measure_bands(rate, &track.samples, &centers);
+    let gains = profile::match_gains(&prof, &track_bands, 1.0).unwrap();
+    // High bands must get boosted, low bands mostly untouched.
+    assert!(gains[20] > 3.0, "expected top-band boost, got {}", gains[20]);
+    assert!(gains[2].abs() < 3.0, "low bands should be ~flat, got {}", gains[2]);
+
+    // Apply the matching EQ and verify the spectral distance shrinks.
+    let preset = Preset {
+        match_enabled: true,
+        match_gains: gains,
+        hpf_enabled: false,
+        eq_enabled: false,
+        comp_enabled: false,
+        loudness_enabled: false,
+        limiter_ceiling_db: 12.0,
+        ..Default::default()
+    };
+    let mut chain = DspChain::new(rate);
+    let mut buf = track.samples.clone();
+    for block in buf.chunks_mut(8192) {
+        chain.process_block(block, &preset, 0.0);
+    }
+    let matched_bands = profile::measure_bands(rate, &buf, &centers);
+
+    let dist = |bands: &[f32]| -> f32 {
+        let n = profile::normalize_bands(&centers, bands);
+        n.iter()
+            .zip(&prof.band_db)
+            .map(|(a, b)| (a - b).abs())
+            .sum::<f32>()
+            / n.len() as f32
+    };
+    let before = dist(&track_bands);
+    let after = dist(&matched_bands);
+    assert!(
+        after < before * 0.6,
+        "matching should close most of the spectral gap: {before:.2} -> {after:.2} dB avg"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn external_preprocess_stub_tool_with_pick() {
+    let audio = sine(48_000, 500.0, 1.0, 0.3);
+    let work = std::env::temp_dir().join("clearwave_test_ext");
+    let _ = std::fs::remove_dir_all(&work);
+
+    // Stub "AI tool": copies input into the out dir under stem-style names;
+    // the pick must select the No_Crowd one.
+    let cmd = r#"sh -c "cp {in} {outdir}/result_No_Crowd.wav && cp {in} {outdir}/result_Crowd.wav""#;
+    let out = clearwave_engine::render::external_preprocess(&audio, cmd, &work, Some("no_crowd"))
+        .unwrap();
+    assert_eq!(out.samples.len(), audio.samples.len());
+    // Content survives the WAV roundtrip
+    let err: f32 = out
+        .samples
+        .iter()
+        .zip(&audio.samples)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(err < 1e-3, "roundtrip error {err}");
 }
 
 #[test]

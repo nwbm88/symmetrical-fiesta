@@ -262,6 +262,20 @@ impl Limiter {
 const HPF_STAGES: usize = 2;
 const EQ_BANDS: usize = 5;
 
+/// Matching-EQ resolution: log-spaced band centers from 40 Hz to 16 kHz.
+pub const MATCH_BANDS: usize = 24;
+const MATCH_Q: f32 = 3.0;
+
+pub fn match_centers() -> [f32; MATCH_BANDS] {
+    let mut out = [0f32; MATCH_BANDS];
+    let lo = 40f32;
+    let hi = 16_000f32;
+    for (i, c) in out.iter_mut().enumerate() {
+        *c = lo * (hi / lo).powf(i as f32 / (MATCH_BANDS - 1) as f32);
+    }
+    out
+}
+
 /// Block metering snapshot produced while processing.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BlockMeters {
@@ -276,6 +290,8 @@ pub struct DspChain {
     fs: f32,
     hpf: [[Biquad; HPF_STAGES]; 2],
     eq: [[Biquad; EQ_BANDS]; 2],
+    /// Reference-matching EQ: one peaking biquad per band per channel.
+    match_eq: Vec<[Biquad; 2]>,
     comp: Compressor,
     limiter: Limiter,
 }
@@ -286,6 +302,7 @@ impl DspChain {
             fs: sample_rate as f32,
             hpf: Default::default(),
             eq: Default::default(),
+            match_eq: Vec::new(),
             comp: Compressor::default(),
             limiter: Limiter::default(),
         }
@@ -301,6 +318,10 @@ impl DspChain {
             for b in ch.iter_mut() {
                 b.reset();
             }
+        }
+        for pair in &mut self.match_eq {
+            pair[0].reset();
+            pair[1].reset();
         }
         self.comp.reset();
         self.limiter.reset();
@@ -321,6 +342,24 @@ impl DspChain {
             }
             for (s, c) in eq_c.iter().enumerate() {
                 self.eq[ch][s].c = *c;
+            }
+        }
+
+        // Matching EQ: rebuild the bank to the gain list's size, then update.
+        let want = if p.match_enabled {
+            p.match_gains.len().min(MATCH_BANDS)
+        } else {
+            0
+        };
+        if self.match_eq.len() != want {
+            self.match_eq = vec![[Biquad::default(); 2]; want];
+        }
+        if want > 0 {
+            let centers = match_centers();
+            for (i, pair) in self.match_eq.iter_mut().enumerate() {
+                let c = BiquadCoeffs::peaking(self.fs, centers[i], p.match_gains[i], MATCH_Q);
+                pair[0].c = c;
+                pair[1].c = c;
             }
         }
     }
@@ -359,6 +398,10 @@ impl DspChain {
                     l = self.eq[0][s].process(l);
                     r = self.eq[1][s].process(r);
                 }
+            }
+            for pair in &mut self.match_eq {
+                l = pair[0].process(l);
+                r = pair[1].process(r);
             }
             if p.comp_enabled {
                 let gr = self.comp.process_frame(

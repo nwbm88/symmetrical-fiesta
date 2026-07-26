@@ -55,6 +55,9 @@ pub fn render(dry: &AudioData, wet: Option<&AudioData>, preset: &Preset) -> Resu
         comp_enabled: false,
         loudness_enabled: false,
         output_gain_db: 0.0,
+        // Already applied in pass 1 — must not run twice.
+        match_enabled: false,
+        match_gains: Vec::new(),
         ..preset.clone()
     };
     limit_only.limiter_ceiling_db = preset.limiter_ceiling_db;
@@ -153,8 +156,16 @@ pub fn export(audio: &AudioData, path: &Path, format: &str) -> Result<()> {
 ///   {out}    output WAV path the tool should write
 ///   {outdir} output directory, for tools (like deep-filter) that keep the
 ///            input's file name and only take a destination folder
+/// `pick` selects among multiple outputs (case-insensitive substring of the
+/// file name) — needed for stem separators that write e.g. "(No Crowd)" and
+/// "(Crowd)" files into {outdir}.
 /// Returns the processed audio, resampled back to the input rate.
-pub fn external_preprocess(audio: &AudioData, command_template: &str, work_dir: &Path) -> Result<AudioData> {
+pub fn external_preprocess(
+    audio: &AudioData,
+    command_template: &str,
+    work_dir: &Path,
+    pick: Option<&str>,
+) -> Result<AudioData> {
     if !command_template.contains("{in}")
         || !(command_template.contains("{out}") || command_template.contains("{outdir}"))
     {
@@ -185,24 +196,42 @@ pub fn external_preprocess(audio: &AudioData, command_template: &str, work_dir: 
         return Err(anyhow!("external tool exited with an error"));
     }
 
-    // Tools driven by {outdir} write <outdir>/<input name> instead of {out}.
-    let produced = if out_path.exists() {
+    // Locate the tool's output. Priority: a file matching `pick`, then the
+    // exact {out} path, then <outdir>/<input name>, then a single leftover
+    // audio file. Stem separators often nest outputs, so search recursively.
+    let candidates = collect_audio_files(&out_dir, 3);
+    let produced = if let Some(needle) = pick.filter(|p| !p.trim().is_empty()) {
+        let needle = needle.to_lowercase();
+        candidates
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().to_lowercase().contains(&needle))
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .ok_or_else(|| {
+                anyhow!(
+                    "no output file matching \"{}\" — tool produced: {}",
+                    needle,
+                    candidates
+                        .iter()
+                        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?
+    } else if out_path.exists() {
         out_path.clone()
     } else {
         let same_name = out_dir.join("clearwave_track.wav");
         if same_name.exists() {
             same_name
         } else {
-            // Fall back to any single audio file the tool left in the out dir.
-            let mut found = None;
-            for entry in std::fs::read_dir(&out_dir)?.flatten() {
-                let p = entry.path();
-                if p.is_file() {
-                    found = Some(p);
-                    break;
-                }
-            }
-            found.ok_or_else(|| anyhow!("external tool produced no output file"))?
+            candidates
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("external tool produced no output file"))?
         }
     };
 
@@ -212,6 +241,30 @@ pub fn external_preprocess(audio: &AudioData, command_template: &str, work_dir: 
     let _ = std::fs::remove_file(&in_path);
     let _ = std::fs::remove_dir_all(&out_dir);
     Ok(resampled)
+}
+
+fn collect_audio_files(dir: &Path, depth: usize) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    if depth == 0 {
+        return out;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                out.extend(collect_audio_files(&p, depth - 1));
+            } else if p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| matches!(e.to_lowercase().as_str(), "wav" | "flac" | "mp3" | "m4a" | "ogg"))
+                .unwrap_or(false)
+            {
+                out.push(p);
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// Minimal shell-style splitter supporting double quotes (enough for

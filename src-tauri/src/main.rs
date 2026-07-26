@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use clearwave_engine::player::{load_f32, Player, SharedState, TrackBuffers};
 use clearwave_engine::preset::Preset;
+use clearwave_engine::profile::Profile;
 use clearwave_engine::{decode, denoise, loudness, render, resample, waveform};
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
@@ -19,6 +20,8 @@ struct LoadedInfo {
     path: PathBuf,
     lufs_dry: f64,
     lufs_wet: f64,
+    /// Raw 24-band measurement of the loaded track, for reference matching.
+    band_db: Vec<f32>,
 }
 
 struct AppState {
@@ -65,6 +68,7 @@ struct Tools {
     ffmpeg: bool,
     deepfilter: bool,
     demucs: bool,
+    uvr: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -113,13 +117,18 @@ async fn load_track(path: String, state: State<'_, AppState>) -> Result<TrackInf
         let lufs_dry = loudness::integrated_lufs(&dry).unwrap_or(-70.0);
         let lufs_wet = loudness::integrated_lufs(&wet).unwrap_or(lufs_dry);
         let pk = waveform::peaks(&dry, 1200);
-        Ok((dry, wet, lufs_dry, lufs_wet, pk, source_rate))
+        let band_db = clearwave_engine::profile::measure_bands(
+            engine_rate,
+            &dry.samples,
+            &clearwave_engine::dsp::match_centers(),
+        );
+        Ok((dry, wet, lufs_dry, lufs_wet, pk, source_rate, band_db))
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
 
-    let (dry, wet, lufs_dry, lufs_wet, pk, source_rate) = result;
+    let (dry, wet, lufs_dry, lufs_wet, pk, source_rate, band_db) = result;
     let duration = dry.duration_seconds();
     let frames = dry.frames();
 
@@ -140,6 +149,7 @@ async fn load_track(path: String, state: State<'_, AppState>) -> Result<TrackInf
         path: PathBuf::from(&path),
         lufs_dry,
         lufs_wet,
+        band_db,
     });
     let preset = state.shared.preset.lock().unwrap().clone();
     refresh_auto_gain(&state, &preset);
@@ -273,7 +283,53 @@ fn detect_tools() -> Tools {
         ffmpeg: render::tool_available("ffmpeg", "-version"),
         deepfilter: render::tool_available("deep-filter", "--version"),
         demucs: render::tool_available("demucs", "--help"),
+        uvr: render::tool_available("audio-separator", "--version"),
     }
+}
+
+#[tauri::command]
+async fn build_profile(files: Vec<String>, name: String) -> Result<Profile, String> {
+    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Profile> {
+        let centers = clearwave_engine::dsp::match_centers();
+        let mut per_track = Vec::new();
+        for f in &files {
+            let native = clearwave_engine::decode::decode_file(f.as_ref())?;
+            let at48 = resample::resample(&native, 48_000)?;
+            per_track.push(clearwave_engine::profile::measure_bands(
+                48_000,
+                &at48.samples,
+                &centers,
+            ));
+        }
+        clearwave_engine::profile::profile_from_tracks(&name, &per_track)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+fn match_gains_current(
+    reference: Profile,
+    strength: f32,
+    state: State<'_, AppState>,
+) -> Result<Vec<f32>, String> {
+    let loaded = state.loaded.lock().unwrap();
+    let info = loaded.as_ref().ok_or("Load a track first")?;
+    clearwave_engine::profile::match_gains(&reference, &info.band_db, strength)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_profile(path: String, reference: Profile) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(&reference).map_err(|e| e.to_string())?;
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn load_profile(path: String) -> Result<Profile, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -282,6 +338,8 @@ async fn export_track(
     format: String,
     preset: Preset,
     external_cmd: Option<String>,
+    external_pick: Option<String>,
+    reference: Option<Profile>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let input = state
@@ -293,7 +351,15 @@ async fn export_track(
         .ok_or("No track loaded")?;
     let out_path = output_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        pipeline::process_and_export(&input, &PathBuf::from(&out_path), &format, &preset, external_cmd.as_deref())
+        pipeline::process_and_export(
+            &input,
+            &PathBuf::from(&out_path),
+            &format,
+            &preset,
+            external_cmd.as_deref(),
+            external_pick.as_deref(),
+            reference.as_ref(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -309,6 +375,8 @@ fn run_batch(
     format: String,
     preset: Preset,
     external_cmd: Option<String>,
+    external_pick: Option<String>,
+    reference: Option<Profile>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if state.batch_running.swap(true, Ordering::SeqCst) {
@@ -346,6 +414,8 @@ fn run_batch(
                 &format,
                 &preset,
                 external_cmd.as_deref(),
+                external_pick.as_deref(),
+                reference.as_ref(),
             );
             let _ = app.emit(
                 "batch-progress",
@@ -418,6 +488,10 @@ fn main() {
             save_preset,
             load_preset,
             detect_tools,
+            build_profile,
+            match_gains_current,
+            save_profile,
+            load_profile,
             export_track,
             run_batch,
             cancel_batch,

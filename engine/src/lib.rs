@@ -7,6 +7,7 @@ pub mod denoise;
 pub mod dsp;
 pub mod loudness;
 pub mod preset;
+pub mod profile;
 pub mod render;
 pub mod resample;
 pub mod waveform;

@@ -45,6 +45,13 @@ pub struct Preset {
 
     /// Brick-wall peak limiter ceiling in dBFS (always on, last in chain).
     pub limiter_ceiling_db: f32,
+
+    /// Reference-matching EQ: morph the track's tonal balance toward a
+    /// profile built from clean studio tracks. The gains are computed
+    /// per-track from the profile (see `profile::match_gains`).
+    pub match_enabled: bool,
+    pub match_strength: f32,
+    pub match_gains: Vec<f32>,
 }
 
 impl Default for Preset {
@@ -78,6 +85,9 @@ impl Default for Preset {
             target_lufs: -14.0,
             output_gain_db: 0.0,
             limiter_ceiling_db: -1.0,
+            match_enabled: false,
+            match_strength: 1.0,
+            match_gains: Vec::new(),
         }
     }
 }
