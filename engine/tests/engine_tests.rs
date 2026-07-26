@@ -448,6 +448,78 @@ fn external_preprocess_stub_tool_with_pick() {
     assert!(err < 1e-3, "roundtrip error {err}");
 }
 
+#[cfg(unix)]
+#[test]
+fn stem_rescue_separates_processes_and_remixes() {
+    use clearwave_engine::render::StemRescue;
+
+    // Build a "song": 200 Hz band + 3 kHz "vocal".
+    let rate = 48_000u32;
+    let band = sine(rate, 200.0, 1.0, 0.3);
+    let voice = sine(rate, 3000.0, 1.0, 0.2);
+    let mut song = band.clone();
+    for (i, s) in song.samples.iter_mut().enumerate() {
+        *s += voice.samples[i];
+    }
+
+    let work = std::env::temp_dir().join("clearwave_test_stems");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).unwrap();
+
+    // Stub separator: asserts the input WAV was handed to it, then writes
+    // the two known stems we prepared on disk.
+    let vocal_src = work.join("src_vocal.wav");
+    let inst_src = work.join("src_inst.wav");
+    render::write_wav24(&voice, &vocal_src).unwrap();
+    render::write_wav24(&band, &inst_src).unwrap();
+    let sep = format!(
+        r#"sh -c "test -s {{in}} && cp {} {{outdir}}/track_Vocals_model.wav && cp {} {{outdir}}/track_Instrumental_model.wav""#,
+        vocal_src.display(),
+        inst_src.display()
+    );
+
+    // No voice command: the remix should reconstruct the original song.
+    let opts = StemRescue {
+        separator_cmd: sep.clone(),
+        voice_cmd: None,
+        vocal_gain_db: 0.0,
+        instrumental_gain_db: 0.0,
+    };
+    let out = render::stem_rescue(&song, &opts, &work).unwrap();
+    assert_eq!(out.samples.len(), song.samples.len());
+    let err = out
+        .samples
+        .iter()
+        .zip(&song.samples)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    assert!(err < 1e-3, "remix should reconstruct the song, max err {err}");
+
+    // Vocal turned down 12 dB: the 3 kHz content must drop, bass stay put.
+    let quiet_vox = StemRescue {
+        separator_cmd: sep,
+        voice_cmd: None,
+        vocal_gain_db: -12.0,
+        instrumental_gain_db: 0.0,
+    };
+    let out2 = render::stem_rescue(&song, &quiet_vox, &work).unwrap();
+    let centers = [200.0f32, 3000.0];
+    let before = clearwave_engine::profile::measure_bands(rate, &song.samples, &centers);
+    let after = clearwave_engine::profile::measure_bands(rate, &out2.samples, &centers);
+    assert!(
+        (after[0] - before[0]).abs() < 1.0,
+        "instrumental band should be untouched: {} -> {}",
+        before[0],
+        after[0]
+    );
+    assert!(
+        after[1] < before[1] - 8.0,
+        "vocal band should drop ~12 dB: {} -> {}",
+        before[1],
+        after[1]
+    );
+}
+
 #[test]
 fn waveform_peaks_shape() {
     let audio = sine(44_100, 440.0, 1.0, 0.5);

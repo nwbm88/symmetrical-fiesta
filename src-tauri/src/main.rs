@@ -337,8 +337,7 @@ async fn export_track(
     output_path: String,
     format: String,
     preset: Preset,
-    external_cmd: Option<String>,
-    external_pick: Option<String>,
+    external: Option<pipeline::ExternalOptions>,
     reference: Option<Profile>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
@@ -356,8 +355,7 @@ async fn export_track(
             &PathBuf::from(&out_path),
             &format,
             &preset,
-            external_cmd.as_deref(),
-            external_pick.as_deref(),
+            external.as_ref(),
             reference.as_ref(),
         )
     })
@@ -374,8 +372,7 @@ fn run_batch(
     output_dir: String,
     format: String,
     preset: Preset,
-    external_cmd: Option<String>,
-    external_pick: Option<String>,
+    external: Option<pipeline::ExternalOptions>,
     reference: Option<Profile>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -413,8 +410,7 @@ fn run_batch(
                 &out,
                 &format,
                 &preset,
-                external_cmd.as_deref(),
-                external_pick.as_deref(),
+                external.as_ref(),
                 reference.as_ref(),
             );
             let _ = app.emit(

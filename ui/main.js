@@ -480,29 +480,40 @@ $("btn-out-dir").addEventListener("click", async () => {
 });
 
 $("ai-external").addEventListener("change", () => {
-  const custom = $("ai-external").value === "custom";
-  $("ai-custom-cmd").classList.toggle("hidden", !custom);
-  $("ai-custom-pick").classList.toggle("hidden", !custom);
+  const mode = $("ai-external").value;
+  $("ai-custom-cmd").classList.toggle("hidden", mode !== "custom");
+  $("ai-custom-pick").classList.toggle("hidden", mode !== "custom");
+  $("voice-fields").classList.toggle("hidden", mode !== "voice");
 });
 
-function externalCmd() {
+/* Build the ExternalOptions object for the backend. */
+function externalOptions() {
   const mode = $("ai-external").value;
   if (mode === "deepfilter") {
-    return { cmd: "deep-filter {in} -o {outdir}", pick: null };
+    return { mode: "single", cmd: "deep-filter {in} -o {outdir}", pick: "" };
   }
   if (mode === "crowd") {
     return {
+      mode: "single",
       cmd: "audio-separator {in} -m UVR-MDX-NET_Crowd_HQ_1.onnx --output_dir {outdir}",
       pick: "no crowd",
     };
   }
-  if (mode === "custom") {
+  if (mode === "voice") {
     return {
-      cmd: $("ai-custom-cmd").value.trim() || null,
-      pick: $("ai-custom-pick").value.trim() || null,
+      mode: "stems",
+      separator_cmd: "audio-separator {in} --output_dir {outdir}",
+      voice_cmd: $("ai-voice-cmd").value.trim(),
+      vocal_gain_db: Number($("ai-vocal-gain").value) || 0,
+      instrumental_gain_db: Number($("ai-inst-gain").value) || 0,
     };
   }
-  return { cmd: null, pick: null };
+  if (mode === "custom") {
+    const cmd = $("ai-custom-cmd").value.trim();
+    if (!cmd) return null;
+    return { mode: "single", cmd, pick: $("ai-custom-pick").value.trim() };
+  }
+  return null;
 }
 
 $("btn-export-one").addEventListener("click", async () => {
@@ -518,13 +529,11 @@ $("btn-export-one").addEventListener("click", async () => {
   setStatus("Rendering… (two-pass loudness, this takes a moment)");
   $("btn-export-one").disabled = true;
   try {
-    const ext = externalCmd();
     const msg = await invoke("export_track", {
       outputPath: path,
       format: fmt,
       preset: collectPreset(),
-      externalCmd: ext.cmd,
-      externalPick: ext.pick,
+      external: externalOptions(),
       reference: $("p-match-on").checked ? refProfile : null,
     });
     setStatus(msg, "ok");
@@ -545,14 +554,12 @@ $("btn-export-all").addEventListener("click", async () => {
   $("batch-bar").style.width = "0%";
   $("batch-label").textContent = "Starting…";
   try {
-    const ext = externalCmd();
     await invoke("run_batch", {
       files: tracks.map((t) => t.path),
       outputDir: outDir,
       format: $("out-format").value,
       preset: collectPreset(),
-      externalCmd: ext.cmd,
-      externalPick: ext.pick,
+      external: externalOptions(),
       reference: $("p-match-on").checked ? refProfile : null,
     });
   } catch (e) {

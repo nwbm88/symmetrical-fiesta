@@ -243,6 +243,107 @@ pub fn external_preprocess(
     Ok(resampled)
 }
 
+/// Options for the stem-rescue pipeline: separate the vocal from the band,
+/// optionally run the vocal through an external voice processor (e.g. an
+/// RVC/Applio model of the singer — only voices you own or have permission
+/// to model — or a generic enhancer like resemble-enhance), then remix.
+#[derive(Clone, Debug)]
+pub struct StemRescue {
+    /// Separator command, e.g. `audio-separator {in} --output_dir {outdir}`.
+    /// Must produce a "Vocals" and an "Instrumental"/"No Vocals" output.
+    pub separator_cmd: String,
+    /// Optional processor applied to the isolated vocal ({in}/{out}/{outdir}).
+    pub voice_cmd: Option<String>,
+    pub vocal_gain_db: f32,
+    pub instrumental_gain_db: f32,
+}
+
+/// Run the stem-rescue pipeline. Returns audio at the input's rate/length.
+pub fn stem_rescue(audio: &AudioData, opts: &StemRescue, work_dir: &Path) -> Result<AudioData> {
+    if !opts.separator_cmd.contains("{in}")
+        || !(opts.separator_cmd.contains("{outdir}") || opts.separator_cmd.contains("{out}"))
+    {
+        return Err(anyhow!(
+            "separator command must contain {{in}} and {{outdir}}"
+        ));
+    }
+    let out_dir = work_dir.join("stems_out");
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir)?;
+    let in_path = work_dir.join("clearwave_track.wav");
+    write_wav24(audio, &in_path)?;
+
+    let cmdline = opts
+        .separator_cmd
+        .replace("{in}", &in_path.to_string_lossy())
+        .replace("{out}", &out_dir.join("stem.wav").to_string_lossy())
+        .replace("{outdir}", &out_dir.to_string_lossy());
+    let parts = shell_words(&cmdline);
+    if parts.is_empty() {
+        return Err(anyhow!("empty separator command"));
+    }
+    let status = Command::new(&parts[0])
+        .args(&parts[1..])
+        .status()
+        .with_context(|| format!("running separator `{}`", parts[0]))?;
+    if !status.success() {
+        return Err(anyhow!("separator exited with an error"));
+    }
+
+    let candidates = collect_audio_files(&out_dir, 3);
+    let is_vocal = |p: &Path| {
+        let n = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        n.contains("vocal") && !n.contains("no vocal") && !n.contains("instrumental")
+    };
+    let is_inst = |p: &Path| {
+        let n = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        n.contains("instrumental") || n.contains("no vocal")
+    };
+    let vocal_path = candidates
+        .iter()
+        .find(|p| is_vocal(p))
+        .cloned()
+        .ok_or_else(|| anyhow!("separator produced no vocal stem (looked for 'Vocals')"))?;
+    let inst_path = candidates
+        .iter()
+        .find(|p| is_inst(p))
+        .or_else(|| candidates.iter().find(|p| **p != vocal_path))
+        .cloned()
+        .ok_or_else(|| anyhow!("separator produced no instrumental stem"))?;
+
+    let mut vocal = crate::resample::resample(&crate::decode::decode_file(&vocal_path)?, audio.sample_rate)?;
+    let mut inst = crate::resample::resample(&crate::decode::decode_file(&inst_path)?, audio.sample_rate)?;
+    vocal.samples.resize(audio.samples.len(), 0.0);
+    inst.samples.resize(audio.samples.len(), 0.0);
+
+    if let Some(cmd) = opts.voice_cmd.as_deref().filter(|c| !c.trim().is_empty()) {
+        let voice_work = work_dir.join("voice");
+        std::fs::create_dir_all(&voice_work)?;
+        vocal = external_preprocess(&vocal, cmd, &voice_work, None)
+            .context("voice processing of the vocal stem failed")?;
+    }
+
+    let gv = 10f32.powf(opts.vocal_gain_db / 20.0);
+    let gi = 10f32.powf(opts.instrumental_gain_db / 20.0);
+    let mut mix = vec![0f32; audio.samples.len()];
+    for i in 0..mix.len() {
+        mix[i] = vocal.samples[i] * gv + inst.samples[i] * gi;
+    }
+
+    let _ = std::fs::remove_file(&in_path);
+    let _ = std::fs::remove_dir_all(&out_dir);
+    Ok(AudioData {
+        sample_rate: audio.sample_rate,
+        samples: mix,
+    })
+}
+
 fn collect_audio_files(dir: &Path, depth: usize) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     if depth == 0 {

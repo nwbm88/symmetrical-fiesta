@@ -8,26 +8,63 @@ use anyhow::{Context, Result};
 use clearwave_engine::preset::Preset;
 use clearwave_engine::profile::{self, Profile};
 use clearwave_engine::{decode, denoise, dsp, render, resample};
+use serde::Deserialize;
 
 const RENDER_RATE: u32 = 48_000;
+
+/// External AI stage configuration sent by the UI.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct ExternalOptions {
+    /// "none" | "single" (one in→out tool) | "stems" (stem rescue)
+    pub mode: String,
+    // single-tool mode
+    pub cmd: String,
+    pub pick: String,
+    // stem-rescue mode
+    pub separator_cmd: String,
+    pub voice_cmd: String,
+    pub vocal_gain_db: f32,
+    pub instrumental_gain_db: f32,
+}
 
 pub fn process_and_export(
     input: &Path,
     output: &Path,
     format: &str,
     preset: &Preset,
-    external_cmd: Option<&str>,
-    external_pick: Option<&str>,
+    external: Option<&ExternalOptions>,
     reference: Option<&Profile>,
 ) -> Result<()> {
     let native = decode::decode_file(input).with_context(|| format!("decoding {}", input.display()))?;
     let mut dry = resample::resample(&native, RENDER_RATE)?;
     drop(native);
 
-    if let Some(cmd) = external_cmd.filter(|c| !c.trim().is_empty()) {
-        let work = std::env::temp_dir().join("clearwave-ai");
-        dry = render::external_preprocess(&dry, cmd, &work, external_pick)
-            .context("external AI pre-processing failed")?;
+    let work = std::env::temp_dir().join("clearwave-ai");
+    match external.map(|e| e.mode.as_str()).unwrap_or("none") {
+        "single" => {
+            let e = external.unwrap();
+            if !e.cmd.trim().is_empty() {
+                let pick = if e.pick.trim().is_empty() { None } else { Some(e.pick.as_str()) };
+                dry = render::external_preprocess(&dry, &e.cmd, &work, pick)
+                    .context("external AI pre-processing failed")?;
+            }
+        }
+        "stems" => {
+            let e = external.unwrap();
+            let opts = render::StemRescue {
+                separator_cmd: e.separator_cmd.clone(),
+                voice_cmd: if e.voice_cmd.trim().is_empty() {
+                    None
+                } else {
+                    Some(e.voice_cmd.clone())
+                },
+                vocal_gain_db: e.vocal_gain_db,
+                instrumental_gain_db: e.instrumental_gain_db,
+            };
+            dry = render::stem_rescue(&dry, &opts, &work).context("stem rescue failed")?;
+        }
+        _ => {}
     }
 
     let wet = if preset.denoise_amount > 0.0 {

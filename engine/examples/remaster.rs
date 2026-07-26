@@ -24,6 +24,37 @@ fn main() -> anyhow::Result<()> {
     let mut dry = resample::resample(&native, 48_000)?;
     drop(native);
 
+    // Test hook: CLEARWAVE_TRIM=<seconds> shortens the input, for quick runs.
+    if let Ok(secs) = std::env::var("CLEARWAVE_TRIM") {
+        if let Ok(secs) = secs.parse::<f32>() {
+            let keep = ((secs * 48_000.0) as usize * 2).min(dry.samples.len());
+            dry.samples.truncate(keep);
+            println!("trimmed input to {:.1}s", dry.duration_seconds());
+        }
+    }
+
+    // Test hook: CLEARWAVE_STEMS=<separator cmd> [+ CLEARWAVE_VOICE=<cmd>]
+    // exercises the Stem Rescue pipeline on real audio.
+    if let Ok(sep) = std::env::var("CLEARWAVE_STEMS") {
+        let opts = render::StemRescue {
+            separator_cmd: sep,
+            voice_cmd: std::env::var("CLEARWAVE_VOICE").ok(),
+            vocal_gain_db: std::env::var("CLEARWAVE_VOCAL_DB")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0),
+            instrumental_gain_db: std::env::var("CLEARWAVE_INST_DB")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0.0),
+        };
+        let t = Instant::now();
+        let work = std::env::temp_dir().join("clearwave-example-stems");
+        std::fs::create_dir_all(&work)?;
+        dry = render::stem_rescue(&dry, &opts, &work)?;
+        println!("stem rescue: {:.1}s elapsed", t.elapsed().as_secs_f32());
+    }
+
     // Test hook: CLEARWAVE_ADD_HISS=<amp> mixes white noise into the input,
     // to verify hiss removal end-to-end on real music.
     if let Ok(amp) = std::env::var("CLEARWAVE_ADD_HISS") {

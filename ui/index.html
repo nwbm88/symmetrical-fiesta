@@ -88,10 +88,19 @@
             <option value="">Off — use built-in AI denoise only</option>
             <option value="deepfilter">DeepFilterNet — strong denoise</option>
             <option value="crowd">Crowd removal — UVR (audio-separator)</option>
+            <option value="voice">Stem rescue — vocals (separate → voice-process → remix)</option>
             <option value="custom">Custom command…</option>
           </select>
           <input id="ai-custom-cmd" type="text" class="hidden" placeholder='mytool "{in}" -o "{out}"  (or {outdir})' />
           <input id="ai-custom-pick" type="text" class="hidden" placeholder="pick output containing… (e.g. No Crowd)" />
+          <div id="voice-fields" class="hidden">
+            <input id="ai-voice-cmd" type="text" placeholder='voice tool for the vocal stem, e.g. resemble-enhance "{in}" "{out}" — or your Applio/RVC CLI' />
+            <div class="row" style="margin-top:6px">
+              <div style="flex:1"><label class="mini-label">Vocal dB</label><input id="ai-vocal-gain" type="number" value="0" min="-12" max="12" step="0.5" style="width:100%" /></div>
+              <div style="flex:1"><label class="mini-label">Band dB</label><input id="ai-inst-gain" type="number" value="0" min="-12" max="12" step="0.5" style="width:100%" /></div>
+            </div>
+            <p class="hint">Only use voice models of yourself or people who gave you permission.</p>
+          </div>
           <p class="hint">Runs before the chain during export/batch. Everything stays on this PC.</p>
         </div>
         <div class="export-buttons">

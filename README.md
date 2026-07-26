@@ -26,6 +26,10 @@ runs locally inside the app.
 - **AI crowd removal** — one-click integration with UVR's dedicated
   crowd-separation model via `audio-separator` (see below): strips audience
   noise from live recordings before the rest of the chain runs.
+- **Stem Rescue** — separates the vocal from the band, runs the vocal
+  through a voice tool of your choice (a model of your own voice, or a
+  no-training enhancer), and remixes with level trims. See
+  [Voice profiles & Stem Rescue](#voice-profiles--stem-rescue).
 - **Live preview** — real-time DSP engine; every slider is heard instantly
   while the track plays. Press `Space` to play/pause, click the waveform to
   seek, and use **A/B Original** to compare against the untouched file.
@@ -89,6 +93,8 @@ green badges in the title bar.
 | [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) | Stronger neural noise removal | download `deep-filter` binary onto your PATH |
 | [audio-separator](https://github.com/nomadkaraoke/python-audio-separator) (UVR models) | **Crowd removal**, vocal/instrument separation | `pip install "audio-separator[gpu]"` |
 | [Demucs](https://github.com/facebookresearch/demucs) | Splits a track into vocal/drums/bass/other stems | `pip install demucs` |
+| [Applio](https://github.com/IAHispano/Applio) / RVC | Trains a reusable voice model (see Stem Rescue) | download the app |
+| [resemble-enhance](https://github.com/resemble-ai/resemble-enhance) | Restores a vocal stem, no training needed | `pip install resemble-enhance` |
 | [ffmpeg](https://ffmpeg.org) | Enables MP3/FLAC/M4A export | `winget install ffmpeg` |
 
 **Crowd removal:** select *Deep clean → Crowd removal (UVR)*. This runs the
@@ -120,12 +126,62 @@ hiss and broadband noise, and it deliberately leaves anything speech-like
 noise. For crowd noise use the UVR crowd model; for wrecked recordings,
 Demucs stem separation is the nuclear option.
 
-**Restoring your own recordings** (your band, family tapes): reference
-profiles work especially well here — build the profile from your best
-recordings and match the rough ones to them. For deeper restoration of
-material you own or have permission for, a stem workflow (separate vocals
-with audio-separator/Demucs → denoise and EQ the stems → remix) can be
-driven through the custom Deep clean command.
+## Voice profiles & Stem Rescue
+
+There are two different things people mean by "make a profile of the singer",
+and ClearWave supports both — one built in, one by orchestrating a trainer.
+
+### 1. Tonal profile — built in, no training
+
+This is the **Reference profile** feature above. Give it your studio
+recordings and it learns their *sonic fingerprint* (how the voice and band
+sit across 24 frequency bands) and pulls rough recordings toward that sound.
+No model training, works in seconds, and it's the right tool ~80% of the time.
+
+### 2. Voice model — train once, then use Stem Rescue
+
+A true voice model (learning the timbre of a specific singer, so a damaged
+vocal can be re-rendered in that voice) has to be *trained*, and there are
+mature open-source trainers for it. ClearWave doesn't reimplement them —
+it orchestrates the pipeline that makes one usable for remastering:
+
+**Step 1 — train a model of the voice (once).** Use
+[Applio](https://github.com/IAHispano/Applio) (a friendly RVC front-end).
+Feed it ~10+ minutes of clean, isolated vocals of the singer. On an RTX 2060
+Super this is an evening's work, and the model is reusable forever.
+
+**Step 2 — use it in ClearWave.** Select *Deep clean → **Stem rescue***.
+For every track, ClearWave then:
+
+1. separates the vocal from the band (`audio-separator`),
+2. runs **only the vocal** through your voice tool,
+3. remixes vocal + band (with individual level trims),
+4. and continues into the normal chain (denoise → EQ → loudness → limiter).
+
+Put your model's CLI in the *voice tool* box using `{in}` / `{out}`
+placeholders. No voice model? A no-training vocal restorer works in the same
+slot and is a great first experiment:
+
+```
+resemble-enhance "{in}" "{out}"
+```
+
+Stem rescue is also just a good way to work even without any voice tool —
+leave the voice box empty and use the vocal/band trims to rebalance a mix
+where the singer is buried.
+
+### Please only model voices you have the right to
+
+Use this for **your own voice, your band, or people who have given you
+permission** — which is exactly the case you described. A voice model is
+personal to the singer: don't build one of an artist you don't know, and
+don't publish output that could be taken for a real recording by someone who
+didn't consent. Everything here runs locally, so this is on your honour
+rather than enforced by a service.
+
+**Other restoration for your own recordings:** reference profiles work
+especially well on family tapes — build the profile from the best-sounding
+recordings and match the rough ones to them.
 
 ## Headless testing
 
