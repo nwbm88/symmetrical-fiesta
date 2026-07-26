@@ -39,10 +39,24 @@ site is fast and never depends on a third-party being up to date.
   and show it. If you don't want share-alike obligations, write your own guide summaries instead
   and use the wiki only as reference.
 
-## 5. Raw game data, if you need more (wago.tools)
+## 5. wago.tools — the complete collectible database (shipped in `data/wago/`)
 
-- <https://wago.tools> — browsable/exportable DB2 client tables (the same data Wowhead is built on).
-- Useful for icons, map IDs, and fields the official API doesn't expose.
+- <https://wago.tools> — free CSV exports of Blizzard's DB2 client tables (the same data
+  Wowhead is built on). This is where the repo's complete database comes from:
+
+| File | Table | What it holds |
+|---|---|---|
+| `Mount.csv` | `https://wago.tools/db2/Mount/csv` | every mount: name, journal source text, description |
+| `Toy.csv` | `https://wago.tools/db2/Toy/csv` | every toy: toy id, item id, journal source text |
+| `Achievement.csv` | `https://wago.tools/db2/Achievement/csv` | every achievement: title, description, points, flags |
+| `Achievement_Category.csv` | `https://wago.tools/db2/Achievement_Category/csv` | category tree |
+| `ToyNames.csv` | filtered from `https://wago.tools/db2/ItemSparse/csv` | toy item names (ItemSparse is ~50 MB; only the toy rows are kept) |
+
+- **To refresh after a patch:** re-download the four tables above into `data/wago/`,
+  regenerate `ToyNames.csv` by filtering ItemSparse to the ItemIDs present in `Toy.csv`,
+  then run `npm run import:wago`.
+- Licensing: this is Blizzard game data; using it in a non-commercial fan site with
+  attribution is the same footing as the official API data. Credit wago.tools for the export.
 
 ## Attribution checklist
 

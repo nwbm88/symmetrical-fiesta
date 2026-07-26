@@ -10,6 +10,7 @@
     "db:init": "psql \"$DATABASE_URL\" -f db/schema.sql",
     "db:seed": "node src/sources/guideSeed.js",
     "demo": "DEMO=1 node src/api/server.js",
+    "import:wago": "node src/sources/wagoDb2.js",
     "ingest:static": "node src/ingest/staticData.js",
     "ingest:enrich": "node src/ingest/enrichDetails.js",
     "ingest:character": "node src/ingest/characterProgress.js",

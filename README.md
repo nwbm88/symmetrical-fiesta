@@ -4,8 +4,12 @@ Self-hosted tracker for **achievements, mounts, and toys**. You enter a characte
 progression, what you're **closest to finishing**, and easy guides with **maps & NPC locations** —
 all served from data stored on your own machine, so it's fast and never shows an out-of-date page.
 
-**No Wowhead scraping.** Data comes from the official Blizzard API plus openly licensed community
-sources. See [`docs/data-sources.md`](docs/data-sources.md).
+**The complete collectible database ships in this repo** (`data/wago/`): every mount (1,687),
+every toy (1,163), and every real achievement (11,960) with names, in-game journal source text
+("Drop: The Lich King · Zone: Icecrown Citadel"), descriptions, points, category paths, and
+account-wide flags — extracted from Blizzard's own client tables, freely served by
+[wago.tools](https://wago.tools). No Wowhead scraping, no API keys needed for the collectible
+data itself. See [`docs/data-sources.md`](docs/data-sources.md).
 
 ## What's here
 
@@ -37,16 +41,18 @@ shapes exactly.
 cp .env.example .env          # add your Battle.net client id/secret + DATABASE_URL
 
 npm run db:init               # create tables (idempotent — also migrates old DBs)
-npm run ingest:static         # download all mounts/toys/achievements (fast: index only)
-npm run ingest:enrich         # fill sources, categories, points, criteria, icons (resumable)
-npm run db:seed               # starter guides + map locations for famous mounts
-npm run ingest:character area-52 yourcharacter   # cache one character
+npm run import:wago           # COMPLETE collectible DB from data/wago (no API keys needed)
+npm run db:seed               # guides + map pins from data/guides.seed.json
+npm run ingest:character area-52 yourcharacter   # cache one character (needs API keys)
 
 npm start                     # open http://localhost:3000 and track your character
-npm test                      # 8 end-to-end API tests (run against demo mode)
+npm test                      # 19 tests: API, guides dataset, complete-DB parsers
 ```
 
-Get free API credentials at <https://develop.battle.net>.
+Only the *character progress* step needs Battle.net credentials (free at
+<https://develop.battle.net>) — the collectible database itself is already in the repo.
+Optional extras: `npm run ingest:static` reconciles with Blizzard's live index, and
+`npm run ingest:enrich` adds achievement criteria trees and icon URLs on top.
 
 **Keep it fresh automatically** — `npm run refresh` re-pulls the static lists and
 continues enrichment where it left off. Cron it nightly:

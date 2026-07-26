@@ -13,30 +13,7 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import { query, pool } from '../db.js';
-
-// Minimal CSV parser with quoted-field support (no dependency needed).
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQuotes) {
-      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
-      else if (ch === '"') inQuotes = false;
-      else field += ch;
-    } else if (ch === '"') inQuotes = true;
-    else if (ch === ',') { row.push(field); field = ''; }
-    else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && text[i + 1] === '\n') i++;
-      row.push(field); field = '';
-      if (row.some((f) => f !== '')) rows.push(row);
-      row = [];
-    } else field += ch;
-  }
-  row.push(field);
-  if (row.some((f) => f !== '')) rows.push(row);
-  return rows;
-}
+import { parseCsv } from '../lib/csv.js';
 
 const TABLES = { mount: 'mounts', toy: 'toys', achievement: 'achievements' };
 
