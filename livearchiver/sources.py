@@ -26,21 +26,23 @@ import requests
 
 from .showinfo import extract_show_info
 
-log = logging.getLogger("topsarchiver")
+log = logging.getLogger("livearchiver")
 
-DEFAULT_QUERIES = [
-    "twenty one pilots full concert",
-    "twenty one pilots live full show",
-    "twenty one pilots full set",
-    "twenty one pilots live concert",
-]
+def default_queries(artist: str) -> list[str]:
+    return [
+        f"{artist} full concert",
+        f"{artist} live full show",
+        f"{artist} full set",
+        f"{artist} live concert",
+    ]
 
 
-def _recording(source: str, rid: str, url: str, title: str, **kw) -> dict:
+def _recording(source: str, rid: str, url: str, title: str, artist: str, **kw) -> dict:
     info = extract_show_info(title, kw.pop("description", "") or "")
     return {
         "id": f"yt:{rid}" if source == "youtube" else f"ia:{rid}",
         "source": source,
+        "artist": artist,
         "url": url,
         "title": title,
         "duration": kw.get("duration"),
@@ -54,7 +56,7 @@ def _recording(source: str, rid: str, url: str, title: str, **kw) -> dict:
 
 # ---------------------------------------------------------------- YouTube
 
-def search_youtube(queries: list[str], limit: int = 50) -> list[dict]:
+def search_youtube(artist: str, queries: list[str], limit: int = 50) -> list[dict]:
     from yt_dlp import YoutubeDL
 
     results: dict[str, dict] = {}
@@ -83,6 +85,7 @@ def search_youtube(queries: list[str], limit: int = 50) -> list[dict]:
                     "youtube", e["id"],
                     e.get("url") or f"https://www.youtube.com/watch?v={e['id']}",
                     e.get("title") or "",
+                    artist,
                     duration=dur,
                     uploader=e.get("uploader") or e.get("channel"),
                     views=e.get("view_count"),
@@ -96,9 +99,9 @@ def search_youtube(queries: list[str], limit: int = 50) -> list[dict]:
 IA_SEARCH_URL = "https://archive.org/advancedsearch.php"
 
 
-def search_archive_org(limit: int = 200) -> list[dict]:
+def search_archive_org(artist: str, limit: int = 200) -> list[dict]:
     params = {
-        "q": '("twenty one pilots") AND (live OR concert OR festival OR tour) '
+        "q": f'("{artist}") AND (live OR concert OR festival OR tour) '
              'AND (mediatype:audio OR mediatype:movies)',
         "fl[]": ["identifier", "title", "date", "venue", "coverage",
                  "mediatype", "downloads", "creator", "format"],
@@ -128,6 +131,7 @@ def search_archive_org(limit: int = 200) -> list[dict]:
             "archive.org", d["identifier"],
             f"https://archive.org/details/{d['identifier']}",
             title,
+            artist,
             uploader=creator,
             views=d.get("downloads"),
             quality=_ia_quality(d.get("format")),
@@ -156,6 +160,6 @@ def _ia_quality(formats) -> Optional[str]:
 
 
 SEARCHERS = {
-    "youtube": lambda queries, limit: search_youtube(queries, limit),
-    "archive.org": lambda queries, limit: search_archive_org(limit * 4),
+    "youtube": lambda artist, queries, limit: search_youtube(artist, queries, limit),
+    "archive.org": lambda artist, queries, limit: search_archive_org(artist, limit * 4),
 }

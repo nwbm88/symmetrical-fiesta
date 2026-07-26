@@ -37,7 +37,7 @@ class ShowInfo:
 def _iso(y: int, m: Optional[int] = None, d: Optional[int] = None) -> Optional[str]:
     if y < 100:
         y += 2000 if y < 50 else 1900
-    if not 2009 <= y <= 2100:  # band formed 2009; reject bogus years
+    if not 1950 <= y <= 2100:  # reject obviously bogus years
         return None
     if m is None:
         return f"{y:04d}"
@@ -55,14 +55,14 @@ def extract_date(text: str) -> Optional[str]:
     t = text.lower()
 
     # 2016-06-14 / 2016.06.14 / 2016/06/14
-    m = re.search(r"\b(20\d{2})[./-](\d{1,2})[./-](\d{1,2})\b", t)
+    m = re.search(r"\b((?:19|20)\d{2})[./-](\d{1,2})[./-](\d{1,2})\b", t)
     if m:
         iso = _iso(int(m.group(1)), int(m.group(2)), int(m.group(3)))
         if iso:
             return iso
 
     # 14-06-2016 / 06/14/2016 (ambiguous day/month: try month-first, then day-first)
-    m = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](20\d{2})\b", t)
+    m = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-]((?:19|20)\d{2})\b", t)
     if m:
         a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
         iso = _iso(y, a, b) or _iso(y, b, a)
@@ -70,28 +70,28 @@ def extract_date(text: str) -> Optional[str]:
             return iso
 
     # June 14, 2016 / June 14th 2016
-    m = re.search(_MONTH_RE + r"\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})", t)
+    m = re.search(_MONTH_RE + r"\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:19|20)\d{2})", t)
     if m:
         iso = _iso(int(m.group(3)), MONTHS[m.group(1)[:3]], int(m.group(2)))
         if iso:
             return iso
 
     # 14 June 2016 / 14th of June, 2016
-    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?" + _MONTH_RE + r"\.?,?\s+(20\d{2})", t)
+    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?" + _MONTH_RE + r"\.?,?\s+((?:19|20)\d{2})", t)
     if m:
         iso = _iso(int(m.group(3)), MONTHS[m.group(2)[:3]], int(m.group(1)))
         if iso:
             return iso
 
     # June 2016
-    m = re.search(_MONTH_RE + r"\.?,?\s+(20\d{2})", t)
+    m = re.search(_MONTH_RE + r"\.?,?\s+((?:19|20)\d{2})", t)
     if m:
         iso = _iso(int(m.group(2)), MONTHS[m.group(1)[:3]])
         if iso:
             return iso
 
     # bare year, e.g. "Lollapalooza 2015"
-    m = re.search(r"\b(20\d{2})\b", t)
+    m = re.search(r"\b((?:19|20)\d{2})\b", t)
     if m:
         return _iso(int(m.group(1)))
     return None
@@ -125,7 +125,7 @@ def extract_venue(text: str) -> Optional[str]:
         if m:
             venue = m.group(1).strip(" .,-|")
             # cut trailing date fragments ("... on June 14 2016")
-            venue = re.split(r"\b(?:on\s+)?" + _MONTH_RE + r"|\b20\d{2}\b|\d{1,2}[./-]\d{1,2}",
+            venue = re.split(r"\b(?:on\s+)?" + _MONTH_RE + r"|\b(?:19|20)\d{2}\b|\d{1,2}[./-]\d{1,2}",
                              venue, 1, flags=re.IGNORECASE)[0].strip(" .,-|")
             if len(venue) >= 3:
                 return venue

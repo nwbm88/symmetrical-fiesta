@@ -20,7 +20,7 @@ from typing import Optional
 
 import requests
 
-log = logging.getLogger("topsarchiver")
+log = logging.getLogger("livearchiver")
 
 # Cleanup applied to song titles pulled from chapters/descriptions.
 _JUNK = re.compile(r"^[\s\-–—:.\d)\]]+|[\s\-–—:.|]+$")
@@ -91,8 +91,7 @@ def tracks_from_description(description: str) -> list[dict]:
 SETLIST_API = "https://api.setlist.fm/rest/1.0/search/setlists"
 
 
-def setlist_fm_songs(date: str, api_key: str,
-                     artist: str = "Twenty One Pilots") -> Optional[list[str]]:
+def setlist_fm_songs(date: str, api_key: str, artist: str) -> Optional[list[str]]:
     """Song names (in order) for the show on ISO *date*, or None."""
     if not date or len(date) != 10:
         return None
@@ -143,8 +142,18 @@ def resolve_tracks(manifest: dict, setlist_key: Optional[str] = None) -> tuple[l
     if t:
         return t, "description tracklist"
 
-    if setlist_key:
-        songs = setlist_fm_songs(manifest["show"].get("date"), setlist_key)
+    # Commenters often post the timestamped setlist the uploader didn't.
+    best: list[dict] = []
+    for c in manifest.get("comments") or []:
+        t = tracks_from_description(c)
+        if len(t) > len(best):
+            best = t
+    if best:
+        return best, "tracklist found in comments"
+
+    artist = manifest.get("artist")
+    if setlist_key and artist:
+        songs = setlist_fm_songs(manifest["show"].get("date"), setlist_key, artist)
         if songs:
             return [{"title": s, "start": None, "end": None} for s in songs], "setlist.fm"
 

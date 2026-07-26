@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "topsarchiver"
+name = "livearchiver"
 version = "0.1.0"
-description = "Search, download, deduplicate and track-split live Twenty One Pilots recordings from YouTube and the Internet Archive"
+description = "Search, download, deduplicate and track-split live recordings of any band from YouTube and the Internet Archive"
 requires-python = ">=3.9"
 dependencies = [
     "yt-dlp>=2025.1.1",
@@ -16,8 +16,8 @@ dependencies = [
 gui = ["PySide6>=6.5"]
 
 [project.scripts]
-topsarchiver = "topsarchiver.cli:main"
-topsarchiver-gui = "topsarchiver.gui:main_standalone"
+livearchiver = "livearchiver.cli:main"
+livearchiver-gui = "livearchiver.gui:main_standalone"
 
 [tool.setuptools.packages.find]
-include = ["topsarchiver*"]
+include = ["livearchiver*"]

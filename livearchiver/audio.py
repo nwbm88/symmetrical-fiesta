@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-log = logging.getLogger("topsarchiver")
+log = logging.getLogger("livearchiver")
 
 MEDIA_EXTS = (".mkv", ".mp4", ".webm", ".avi", ".mov", ".mpg",
               ".flac", ".wav", ".shn", ".mp3", ".ogg", ".m4a", ".opus")
@@ -112,6 +112,7 @@ def _safe(name: str) -> str:
 
 
 def cut_tracks(master: Path, tracks: list[dict], show: dict,
+               artist: str = "Unknown Artist",
                album: Optional[str] = None, progress=None) -> list[Path]:
     total = duration_of(master)
     album = album or " - ".join(x for x in (show.get("date"), show.get("venue")) if x) \
@@ -128,7 +129,7 @@ def cut_tracks(master: Path, tracks: list[dict], show: dict,
                "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
                "-acodec", "flac",
                "-metadata", f"title={t['title']}",
-               "-metadata", "artist=Twenty One Pilots",
+               "-metadata", f"artist={artist}",
                "-metadata", f"album={album}",
                "-metadata", f"track={i}/{len(tracks)}",
                ]

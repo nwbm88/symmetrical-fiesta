@@ -1,4 +1,4 @@
-"""Native desktop app (Qt / PySide6).  Launch with `topsarchiver gui`.
+"""Native desktop app (Qt / PySide6).  Launch with `livearchiver gui`.
 
 Two tabs:
 
@@ -29,10 +29,13 @@ from PySide6.QtWidgets import (
     QFileDialog, QDialog, QFormLayout, QDialogButtonBox, QMessageBox,
 )
 
+from . import DEFAULT_ARTIST
 from . import catalog as cat_mod
 from . import sources
 from .download import download
 from .pipeline import split_show, scan_collection
+from .showinfo import extract_date
+from .tracks import tracks_from_description
 
 REC_ROLE = Qt.UserRole + 1
 
@@ -43,15 +46,15 @@ class SearchWorker(QThread):
     """One-shot background search of all sources."""
     done = Signal(list, str)  # results, error summary ("" if fine)
 
-    def __init__(self, queries, limit=50, parent=None):
+    def __init__(self, artist, queries, limit=50, parent=None):
         super().__init__(parent)
-        self.queries, self.limit = queries, limit
+        self.artist, self.queries, self.limit = artist, queries, limit
 
     def run(self):
         results, errors = [], []
         for name, fn in sources.SEARCHERS.items():
             try:
-                results.extend(fn(self.queries, self.limit))
+                results.extend(fn(self.artist, self.queries, self.limit))
             except Exception as e:
                 errors.append(f"{name}: {e}")
         self.done.emit(results, "; ".join(errors))
@@ -134,15 +137,125 @@ class EditShowDialog(QDialog):
                 "venue": self.venue.text().strip() or None}
 
 
+class TextResolveDialog(QDialog):
+    """The 'wall of text' resolver.
+
+    Shows everything we scraped from the page — description, comments,
+    reviews — so the user can highlight the piece the heuristics missed and
+    say what it is: the date, the place, or a timestamped tracklist.
+    """
+
+    def __init__(self, manifest: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Find show details in page text")
+        self.resize(900, 700)
+        self.tracks: list[dict] | None = None
+        show = manifest.get("show", {})
+
+        lay = QVBoxLayout(self)
+        hint = QLabel(
+            "Highlight text below, then click a button to use it. "
+            "“Parse selection as tracklist” understands timestamp lines like "
+            "“14:32 Song Name”.")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        self.text = QPlainTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setPlainText(self._wall_of_text(manifest))
+        lay.addWidget(self.text, 1)
+
+        btns = QHBoxLayout()
+        b_date = QPushButton("Use selection as date")
+        b_date.clicked.connect(self._use_as_date)
+        b_venue = QPushButton("Use selection as place")
+        b_venue.clicked.connect(self._use_as_venue)
+        b_tracks = QPushButton("Parse selection as tracklist")
+        b_tracks.clicked.connect(self._use_as_tracklist)
+        for b in (b_date, b_venue, b_tracks):
+            btns.addWidget(b)
+        btns.addStretch(1)
+        lay.addLayout(btns)
+
+        form = QFormLayout()
+        self.date = QLineEdit(show.get("date") or "")
+        self.date.setPlaceholderText("YYYY-MM-DD")
+        self.venue = QLineEdit(show.get("venue") or "")
+        self.venue.setPlaceholderText("Venue, City")
+        self.tracks_label = QLabel("tracklist: unchanged")
+        form.addRow("Date", self.date)
+        form.addRow("Place", self.venue)
+        form.addRow("", self.tracks_label)
+        lay.addLayout(form)
+
+        bb = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    @staticmethod
+    def _wall_of_text(manifest: dict) -> str:
+        parts = [f"TITLE:\n{manifest.get('title') or ''}",
+                 f"DESCRIPTION:\n{manifest.get('description') or '(none)'}"]
+        comments = manifest.get("comments") or []
+        if comments:
+            parts.append("COMMENTS / REVIEWS:")
+            for i, c in enumerate(comments, 1):
+                parts.append(f"--- comment {i} ---\n{c}")
+        else:
+            parts.append("(no comments were captured for this show)")
+        return "\n\n".join(parts)
+
+    def _selection(self) -> str:
+        # Qt uses U+2029 as the paragraph separator in selections
+        return self.text.textCursor().selectedText().replace("\u2029", "\n")
+
+    def _use_as_date(self):
+        sel = self._selection()
+        parsed = extract_date(sel) if sel else None
+        if parsed:
+            self.date.setText(parsed)
+        else:
+            QMessageBox.information(
+                self, "No date found",
+                "Couldn't read a date from the selection — highlight something "
+                "like “June 14, 2016” or “2016-06-14”, or type it into the "
+                "Date field yourself.")
+
+    def _use_as_venue(self):
+        sel = " ".join(self._selection().split())
+        if sel:
+            self.venue.setText(sel[:120])
+
+    def _use_as_tracklist(self):
+        sel = self._selection()
+        tracks = tracks_from_description(sel) if sel else []
+        if tracks:
+            self.tracks = tracks
+            self.tracks_label.setText(
+                f"tracklist: {len(tracks)} tracks parsed from selection "
+                f"(saved on Save — then use Re-split)")
+        else:
+            QMessageBox.information(
+                self, "No tracklist found",
+                "Couldn't parse a tracklist from the selection. It needs "
+                "several lines with timestamps, e.g.\n\n"
+                "    14:32 Heavydirtysoul\n    18:05 Migraine\n    ...")
+
+    def values(self):
+        return {"date": self.date.text().strip() or None,
+                "venue": self.venue.text().strip() or None}
+
+
 # ------------------------------------------------------------------ main win
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Twenty One Pilots Archiver")
+        self.setWindowTitle("Live Show Archiver")
         self.resize(1200, 780)
 
-        self.settings = QSettings("topsarchiver", "topsarchiver")
+        self.settings = QSettings("livearchiver", "livearchiver")
         self.catalog_path = Path(self.settings.value("catalog", "catalog.json"))
         self.cat = cat_mod.load(self.catalog_path)
         self.cat.setdefault("downloaded", {})
@@ -187,11 +300,16 @@ class MainWindow(QMainWindow):
         outer = QVBoxLayout(w)
 
         bar = QHBoxLayout()
+        bar.addWidget(QLabel("Band / artist:"))
+        self.artist_edit = QLineEdit(
+            self.settings.value("artist", DEFAULT_ARTIST))
+        self.artist_edit.setPlaceholderText("e.g. Twenty One Pilots")
+        bar.addWidget(self.artist_edit, 1)
         self.search_btn = QPushButton("Search sources")
         self.search_btn.clicked.connect(self.start_search)
         self.extra_query = QLineEdit()
         self.extra_query.setPlaceholderText(
-            "optional extra search, e.g. “twenty one pilots red rocks 2019” "
+            "optional extra search, e.g. “red rocks 2019” "
             "(added to the built-in queries)")
         bar.addWidget(self.search_btn)
         bar.addWidget(self.extra_query, 1)
@@ -257,14 +375,21 @@ class MainWindow(QMainWindow):
     def start_search(self):
         if self.search_worker and self.search_worker.isRunning():
             return
-        queries = list(sources.DEFAULT_QUERIES)
+        artist = self.artist_edit.text().strip()
+        if not artist:
+            self.statusBar().showMessage("Enter a band/artist name first.")
+            return
+        self.settings.setValue("artist", artist)
+        queries = sources.default_queries(artist)
         extra = self.extra_query.text().strip()
         if extra:
-            queries.append(extra)
+            queries.append(f"{artist} {extra}" if artist.lower() not in extra.lower()
+                           else extra)
         self.search_btn.setEnabled(False)
         self.search_btn.setText("Searching ...")
-        self.statusBar().showMessage("Searching YouTube and archive.org ...")
-        self.search_worker = SearchWorker(queries, parent=self)
+        self.statusBar().showMessage(
+            f"Searching YouTube and archive.org for {artist} ...")
+        self.search_worker = SearchWorker(artist, queries, parent=self)
         self.search_worker.done.connect(self.on_search_done)
         self.search_worker.start()
 
@@ -308,6 +433,8 @@ class MainWindow(QMainWindow):
             head = g["date"] or "unknown date"
             if g["venue"]:
                 head += f" — {g['venue']}"
+            if g.get("artist") and len(cat_mod.artists_in(self.cat)) > 1:
+                head = f"{g['artist']}:  {head}"
             top = QTreeWidgetItem([head, "", "", "", "",
                                    f"{len(recs)} version(s)"])
             top.setFont(0, bold)
@@ -381,6 +508,11 @@ class MainWindow(QMainWindow):
 
         left = QWidget()
         llay = QVBoxLayout(left)
+        self.f_attention = QCheckBox("⚠ Needs attention only")
+        self.f_attention.setToolTip("Shows missing a date or place, with "
+                                    "unidentified tracks, or not split yet.")
+        self.f_attention.toggled.connect(self.refresh_collection)
+        llay.addWidget(self.f_attention)
         self.show_list = QListWidget()
         self.show_list.currentRowChanged.connect(self.show_details)
         llay.addWidget(self.show_list, 1)
@@ -424,11 +556,16 @@ class MainWindow(QMainWindow):
         b_resplit.setToolTip("Throw away tracks.json and detect the tracklist "
                              "again (after fixing chapters/setlist issues).")
         b_resplit.clicked.connect(lambda: self.queue_split(redetect=True))
+        b_resolve = QPushButton("Find details in page text ...")
+        b_resolve.setToolTip("Read the description and comments yourself and "
+                             "point the archiver at the date, place, or a "
+                             "timestamped tracklist it missed.")
+        b_resolve.clicked.connect(self.resolve_text)
         b_edit = QPushButton("Edit date/venue")
         b_edit.clicked.connect(self.edit_show)
         b_open = QPushButton("Open folder")
         b_open.clicked.connect(self.open_show_folder)
-        for b in (self.b_split, b_resplit, b_edit, b_open):
+        for b in (self.b_split, b_resplit, b_resolve, b_edit, b_open):
             btns.addWidget(b)
         btns.addStretch(1)
         rlay.addLayout(btns)
@@ -439,16 +576,26 @@ class MainWindow(QMainWindow):
         return w
 
     def refresh_collection(self):
-        self.shows = scan_collection(self.collection_dir)
+        all_shows = scan_collection(self.collection_dir)
+        if getattr(self, "f_attention", None) and self.f_attention.isChecked():
+            all_shows = [s for s in all_shows if s["issues"] or not s["tracks"]]
+        self.shows = all_shows
+        multi_artist = len({s["artist"] for s in all_shows}) > 1
         row = self.show_list.currentRow()
         self.show_list.clear()
         for s in self.shows:
             n_tracks = len(s["tracks"])
             mark = "🎵" if n_tracks else ("🎚" if s["has_master"] else "⬇")
-            item = QListWidgetItem(f"{mark} {s['dir'].name}")
-            item.setToolTip(f"{n_tracks} split tracks" if n_tracks else
-                            "audio extracted, not split" if s["has_master"] else
-                            "downloaded, audio not extracted yet")
+            if s["issues"]:
+                mark = "⚠ " + mark
+            name = f"{s['artist']} — {s['dir'].name}" if multi_artist else s["dir"].name
+            item = QListWidgetItem(f"{mark} {name}")
+            state = (f"{n_tracks} split tracks" if n_tracks else
+                     "audio extracted, not split" if s["has_master"] else
+                     "downloaded, audio not extracted yet")
+            if s["issues"]:
+                state += "\nNeeds attention: " + ", ".join(s["issues"])
+            item.setToolTip(state)
             self.show_list.addItem(item)
         if self.shows:
             self.show_list.setCurrentRow(min(max(row, 0), len(self.shows) - 1))
@@ -474,8 +621,9 @@ class MainWindow(QMainWindow):
         show = m.get("show", {})
         self.detail_head.setText(m.get("title") or s["dir"].name)
         meta = []
-        meta.append(f"<b>Date:</b> {show.get('date') or '<i>unknown — please edit</i>'}")
-        meta.append(f"<b>Place:</b> {show.get('venue') or '<i>unknown — please edit</i>'}")
+        meta.append(f"<b>Artist:</b> {s['artist']}")
+        meta.append(f"<b>Date:</b> {show.get('date') or '<i>unknown</i>'}")
+        meta.append(f"<b>Place:</b> {show.get('venue') or '<i>unknown</i>'}")
         meta.append(f"<b>Source:</b> {m.get('source')} — "
                     f"<a href='{m.get('source_url')}'>{m.get('source_url')}</a>")
         if m.get("uploader"):
@@ -484,6 +632,10 @@ class MainWindow(QMainWindow):
                  "audio extracted, not split yet" if s["has_master"] else
                  "downloaded — audio not extracted yet")
         meta.append(f"<b>Status:</b> {state}")
+        if s["issues"]:
+            meta.append("<b style='color:#c0392b'>⚠ Needs attention:</b> "
+                        + ", ".join(s["issues"])
+                        + " — try “Find details in page text”")
         self.detail_meta.setText("<br>".join(meta))
         self.description.setPlainText(m.get("description") or "(no description)")
 
@@ -515,12 +667,32 @@ class MainWindow(QMainWindow):
         dlg = EditShowDialog(s["manifest"].get("show", {}), self)
         if dlg.exec() != QDialog.Accepted:
             return
-        s["manifest"]["show"] = dlg.values()
+        self._apply_show_values(s, dlg.values())
+
+    def resolve_text(self):
+        s = self._current_show()
+        if not s:
+            return
+        dlg = TextResolveDialog(s["manifest"], self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        if dlg.tracks:
+            audio_dir = s["dir"] / "audio"
+            audio_dir.mkdir(exist_ok=True)
+            (audio_dir / "tracks.json").write_text(
+                json.dumps(dlg.tracks, indent=2, ensure_ascii=False))
+            self.statusBar().showMessage(
+                f"Saved {len(dlg.tracks)}-track tracklist — now run "
+                f"“Extract & split tracks”.")
+        self._apply_show_values(s, dlg.values())
+
+    def _apply_show_values(self, s: dict, values: dict):
+        s["manifest"]["show"] = values
         (s["dir"] / "show.json").write_text(
             json.dumps(s["manifest"], indent=2, ensure_ascii=False))
         rid = s["manifest"].get("recording_id")
         if rid and rid in self.cat["recordings"]:
-            self.cat["recordings"][rid]["show"] = dlg.values()
+            self.cat["recordings"][rid]["show"] = values
             self.save_catalog()
         self.refresh_collection()
         self.refresh_tree()
@@ -650,7 +822,7 @@ def _fmt_views(v) -> str:
 
 def run() -> int:
     app = QApplication(sys.argv[:1])
-    app.setApplicationName("Twenty One Pilots Archiver")
+    app.setApplicationName("Live Show Archiver")
     win = MainWindow()
     win.show()
     return app.exec()

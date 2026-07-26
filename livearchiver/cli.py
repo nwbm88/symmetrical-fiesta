@@ -2,10 +2,10 @@
 
 Typical session:
 
-    topsarchiver search                  # build/refresh the catalog
-    topsarchiver list --dupes            # inspect shows with multiple versions
-    topsarchiver download yt:AbCdEf1234  # grab the version you picked
-    topsarchiver split "collection/2016-06-14 - ..."   # audio -> named tracks
+    livearchiver search                  # build/refresh the catalog
+    livearchiver list --dupes            # inspect shows with multiple versions
+    livearchiver download yt:AbCdEf1234  # grab the version you picked
+    livearchiver split "collection/2016-06-14 - ..."   # audio -> named tracks
 """
 
 from __future__ import annotations
@@ -21,17 +21,17 @@ from .download import download
 from . import audio as audio_mod
 from .pipeline import split_show
 
-log = logging.getLogger("topsarchiver")
+log = logging.getLogger("livearchiver")
 
 
 def cmd_search(args) -> int:
     cat = cat_mod.load(args.catalog)
-    queries = args.query or sources.DEFAULT_QUERIES
+    queries = args.query or sources.default_queries(args.artist)
     results = []
     for name, fn in sources.SEARCHERS.items():
         if args.source and name != args.source:
             continue
-        results.extend(fn(queries, args.limit))
+        results.extend(fn(args.artist, queries, args.limit))
     added = cat_mod.merge_results(cat, results)
     cat_mod.save(cat, args.catalog)
     print(f"\ncatalog: {len(cat['recordings'])} recordings ({added} new) -> {args.catalog}")
@@ -42,7 +42,7 @@ def cmd_search(args) -> int:
 def cmd_list(args) -> int:
     cat = cat_mod.load(args.catalog)
     if not cat["recordings"]:
-        print("catalog is empty — run 'topsarchiver search' first")
+        print("catalog is empty — run 'livearchiver search' first")
         return 1
     cat_mod.print_groups(cat, only_dupes=args.dupes, only_new=args.new)
     return 0
@@ -55,7 +55,7 @@ def cmd_download(args) -> int:
         rec = cat["recordings"].get(rid)
         if not rec:
             print(f"unknown id {rid!r} — ids look like yt:VIDEOID or ia:IDENTIFIER "
-                  f"(see 'topsarchiver list')", file=sys.stderr)
+                  f"(see 'livearchiver list')", file=sys.stderr)
             rc = 1
             continue
         try:
@@ -90,6 +90,31 @@ def cmd_split(args) -> int:
     return 0
 
 
+def cmd_todo(args) -> int:
+    from .pipeline import scan_collection
+    shows = scan_collection(args.dir)
+    if not shows:
+        print(f"no shows found under {args.dir}")
+        return 0
+    flagged = 0
+    for s in shows:
+        state = (f"{len(s['tracks'])} tracks split" if s["tracks"] else
+                 "audio extracted, NOT split" if s["has_master"] else
+                 "downloaded, audio NOT extracted")
+        if s["issues"]:
+            flagged += 1
+            print(f"⚠ {s['dir']}")
+            for i in s["issues"]:
+                print(f"    - {i}")
+            print(f"    ({state})")
+        elif not s["tracks"]:
+            flagged += 1
+            print(f"… {s['dir']}\n    - {state}")
+    if not flagged:
+        print(f"all {len(shows)} shows are complete — dated, placed and split.")
+    return 0
+
+
 def cmd_gui(args) -> int:
     try:
         from .gui import run
@@ -101,19 +126,23 @@ def cmd_gui(args) -> int:
 
 
 def main(argv=None) -> int:
+    from . import DEFAULT_ARTIST
+
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--catalog", type=Path, default=Path("catalog.json"),
                         help="catalog file (default: ./catalog.json)")
     common.add_argument("-v", "--verbose", action="store_true")
 
     ap = argparse.ArgumentParser(
-        prog="topsarchiver",
-        description="Archive Twenty One Pilots live recordings from YouTube "
+        prog="livearchiver",
+        description="Archive a band's live recordings from YouTube "
                     "and the Internet Archive.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("search", parents=[common],
                        help="search sources and update the catalog")
+    p.add_argument("--artist", default=DEFAULT_ARTIST,
+                   help=f"band/artist to search for (default: {DEFAULT_ARTIST!r})")
     p.add_argument("--query", action="append",
                    help="extra search query (repeatable); defaults to a "
                         "built-in set of full-concert queries")
@@ -154,6 +183,13 @@ def main(argv=None) -> int:
     p.add_argument("--redetect", action="store_true",
                    help="ignore an existing tracks.json and re-detect")
     p.set_defaults(fn=cmd_split)
+
+    p = sub.add_parser("todo", parents=[common],
+                       help="list shows that still need manual attention "
+                            "(missing date/place, unidentified tracks, not split)")
+    p.add_argument("--dir", type=Path, default=Path("collection"),
+                   help="collection root (default: ./collection)")
+    p.set_defaults(fn=cmd_todo)
 
     p = sub.add_parser("gui", parents=[common],
                        help="launch the desktop app (needs PySide6)")

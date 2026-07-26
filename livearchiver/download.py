@@ -23,7 +23,7 @@ from typing import Optional
 
 import requests
 
-log = logging.getLogger("topsarchiver")
+log = logging.getLogger("livearchiver")
 
 
 def _safe(name: str, maxlen: int = 120) -> str:
@@ -40,7 +40,8 @@ def show_dir_name(rec: dict) -> str:
 def download(rec: dict, collection: Path, audio_only: bool = False,
              progress=None) -> Path:
     """progress: optional callable(fraction_or_None, message)."""
-    dest = collection / show_dir_name(rec)
+    artist = rec.get("artist") or "Unknown Artist"
+    dest = collection / _safe(artist) / show_dir_name(rec)
     dest.mkdir(parents=True, exist_ok=True)
 
     if rec["source"] == "youtube":
@@ -58,8 +59,18 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
     show["date"] = show.get("date") or full.date
     show["venue"] = show.get("venue") or full.venue
 
+    # Still missing something?  Mine the comments/reviews — fans often post
+    # the date, venue, or a full timestamped setlist there.
+    comments = info.get("comments") or []
+    for c in comments:
+        if show["date"] and show["venue"]:
+            break
+        found = extract_show_info(c)
+        show["date"] = show["date"] or found.date
+        show["venue"] = show["venue"] or found.venue
+
     manifest = {
-        "artist": "Twenty One Pilots",
+        "artist": artist,
         "show": show,
         "recording_id": rec["id"],
         "source": rec["source"],
@@ -71,6 +82,7 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
         "files": info.get("files", []),
         "chapters": info.get("chapters") or [],
         "description": (info.get("description") or "")[:8000],
+        "comments": [c[:2000] for c in comments[:150]],
     }
     (dest / "show.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     log.info("saved %s", dest / "show.json")
@@ -109,6 +121,10 @@ def _download_youtube(rec: dict, dest: Path, audio_only: bool,
         "merge_output_format": None if audio_only else "mkv",
         "noplaylist": True,
         "progress_hooks": [hook],
+        # comments often carry the date/venue/setlist the title lacks
+        "getcomments": True,
+        "extractor_args": {"youtube": {"max_comments": ["150"],
+                                       "comment_sort": ["top"]}},
     }
     with YoutubeDL(opts) as ydl:
         info = ydl.extract_info(rec["url"], download=True)
@@ -121,6 +137,8 @@ def _download_youtube(rec: dict, dest: Path, audio_only: bool,
         "upload_date": info.get("upload_date"),
         "duration": info.get("duration"),
         "chapters": info.get("chapters"),
+        "comments": [c.get("text", "") for c in info.get("comments") or []
+                     if c.get("text")],
         "files": files,
     }
 
@@ -165,12 +183,18 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
         saved.append(out.name)
 
     md = meta.get("metadata", {})
+    reviews = [r.get("reviewbody", "") for r in meta.get("reviews") or []
+               if r.get("reviewbody")]
+    notes = md.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        reviews.insert(0, notes)
     return {
         "title": md.get("title"),
         "description": md.get("description") if isinstance(md.get("description"), str) else "",
         "upload_date": (md.get("publicdate") or "")[:10].replace("-", "") or None,
         "duration": None,
         "chapters": None,
+        "comments": reviews,
         "files": saved,
     }
 
