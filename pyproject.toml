@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "topsarchiver"
+version = "0.1.0"
+description = "Search, download, deduplicate and track-split live Twenty One Pilots recordings from YouTube and the Internet Archive"
+requires-python = ">=3.9"
+dependencies = [
+    "yt-dlp>=2025.1.1",
+    "requests>=2.31",
+]
+
+[project.scripts]
+topsarchiver = "topsarchiver.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["topsarchiver*"]
