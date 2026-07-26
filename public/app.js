@@ -16,6 +16,38 @@ fetch('/api/config').then((r) => r.json()).then((cfg) => {
   $('#region').value = cfg.region ?? 'us';
 });
 
+// Signed in? Show battletag + character chips + account-total view.
+fetch('/api/me').then((r) => (r.ok ? r.json() : null)).then((me) => {
+  if (!me) return;
+  $('#auth').innerHTML =
+    `<span class="tag">${esc(me.battletag)}</span><a class="chip" href="/auth/logout">Log out</a>`;
+  $('#mychars-list').innerHTML = me.characters.map((c) =>
+    `<button class="chip" data-char="${esc(c.realm)}:${esc(c.name)}">
+       ${esc(c.name)} <small>· ${esc(c.realm)}${c.level ? ` · ${c.level}` : ''}</small>
+     </button>`).join('');
+  $('#mychars').hidden = false;
+});
+
+document.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-char]');
+  if (!chip) return;
+  const [realm, name] = chip.dataset.char.split(':');
+  loadCharacter(realm.toLowerCase(), name);
+});
+
+// Account-wide rollup (union across all your characters).
+$('#account-view')?.addEventListener('click', async () => {
+  const res = await fetch('/api/me/rollup');
+  const data = await res.json();
+  if (!res.ok) return;
+  current = data.proxy_char ?? current; // missing-lists use the freshest synced char
+  Object.keys(missingCache).forEach((k) => delete missingCache[k]);
+  render({
+    name: 'Account total', realm: data.battletag,
+    progression: data.progression, closest: data.closest,
+  });
+});
+
 $('#lookup').addEventListener('submit', async (e) => {
   e.preventDefault();
   const realm = $('#realm').value.trim().toLowerCase().replace(/[\s']/g, '-');
@@ -87,10 +119,18 @@ function closestRow(a) {
   </div>`;
 }
 
-// ---------- tabs ----------
+// ---------- tabs + filter ----------
 $('#tabs').addEventListener('click', (e) => {
   const tab = e.target.closest('[data-tab]');
   if (tab) selectTab(tab.dataset.tab);
+});
+
+// Live text filter over whichever panel is visible.
+$('#filter').addEventListener('input', () => {
+  const q = $('#filter').value.trim().toLowerCase();
+  const panel = document.querySelector('.panel:not([hidden])');
+  for (const item of panel.querySelectorAll('.row, .card'))
+    item.style.display = !q || item.textContent.toLowerCase().includes(q) ? '' : 'none';
 });
 
 async function selectTab(id) {
@@ -98,6 +138,7 @@ async function selectTab(id) {
     b.setAttribute('aria-selected', String(b.dataset.tab === id));
   for (const p of document.querySelectorAll('.panel'))
     p.hidden = p.id !== `panel-${id}`;
+  $('#filter').value = '';
   if ((id === 'mount' || id === 'toy') && current) await loadMissing(id);
 }
 
@@ -145,8 +186,9 @@ function openGuide(name, { guide, locations }) {
 }
 
 // Zone map: 3:2 SVG (WoW map aspect) with a coordinate grid and numbered pins.
-// Coords are the addon-standard 0–100 map percentages. Swap the grid for real
-// map tiles later; the pin math stays identical.
+// Coords are the addon-standard 0–100 map percentages. If you drop a zone image
+// at public/maps/<map_id>.jpg it renders as the background automatically
+// (pin math is identical either way); otherwise you get the grid.
 function mapFigure(locs) {
   const W = 100, H = 66.6, sy = H / 100;
   const grid = [];
@@ -154,6 +196,10 @@ function mapFigure(locs) {
     grid.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}"/>`);
   for (let y = 10; y < 100; y += 10)
     grid.push(`<line x1="0" y1="${y * sy}" x2="${W}" y2="${y * sy}"/>`);
+  const tile = locs[0].map_id
+    ? `<image href="/maps/${Number(locs[0].map_id)}.jpg" x="0" y="0" width="${W}" height="${H}"
+              preserveAspectRatio="xMidYMid slice"/>` // absent file renders nothing → grid shows
+    : '';
 
   const pins = locs.map((l, i) => {
     const x = Math.min(98, Math.max(2, l.coord_x));
@@ -171,7 +217,9 @@ function mapFigure(locs) {
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Map of ${zone} with ${locs.length} location pin(s)">
       <rect width="${W}" height="${H}" fill="var(--page)" stroke="var(--grid)" stroke-width="0.3"/>
       <g stroke="var(--grid)" stroke-width="0.2">${grid.join('')}</g>
-      <text x="2.5" y="5" font-size="3.2" font-weight="600" fill="var(--muted)">${zone}</text>
+      ${tile}
+      <text x="2.5" y="5" font-size="3.2" font-weight="600" fill="var(--muted)"
+            paint-order="stroke" stroke="var(--surface)" stroke-width="0.6">${zone}</text>
       ${pins}
     </svg>
     <figcaption class="map-caption">Grid = in-game map coordinates (0–100)</figcaption>

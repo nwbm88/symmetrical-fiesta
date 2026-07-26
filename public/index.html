@@ -23,7 +23,16 @@
       <input id="name" placeholder="Character" required spellcheck="false">
       <button type="submit">Track</button>
     </form>
+    <div id="auth" class="auth">
+      <a class="chip" href="/auth/login">Sign in with Battle.net</a>
+    </div>
   </header>
+
+  <div id="mychars" class="mychars" hidden>
+    <span class="sub">Your characters:</span>
+    <span id="mychars-list"></span>
+    <button class="chip chip-gold" id="account-view">Account total</button>
+  </div>
 
   <main>
     <section id="empty" class="empty">
@@ -45,6 +54,7 @@
         <button role="tab" data-tab="closest" aria-selected="true">Closest to finishing</button>
         <button role="tab" data-tab="mount" aria-selected="false">Missing mounts</button>
         <button role="tab" data-tab="toy" aria-selected="false">Missing toys</button>
+        <input id="filter" type="search" placeholder="Filter…" aria-label="Filter list">
       </nav>
 
       <div id="panel-closest" class="panel"></div>

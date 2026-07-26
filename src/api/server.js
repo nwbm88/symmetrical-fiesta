@@ -14,12 +14,34 @@ const app = express();
 app.use(express.static(path.join(__dirname, '../../public')));
 
 // Real-mode deps are imported lazily so demo mode never touches pg.
-let db, syncCharacter, logic;
+let db, syncCharacter, logic, account;
 async function real() {
   db ??= await import('../db.js');
   ({ syncCharacter } = await import('../ingest/characterProgress.js'));
   logic ??= await import('../logic/closest.js');
+  account ??= await import('../logic/account.js');
 }
+
+// Battle.net login (fake instant login in demo mode).
+const { mountAuth, getSession } = await import('../auth/routes.js');
+mountAuth(app, { demo: DEMO, db: { query: async (...a) => { await real(); return db.query(...a); } } });
+
+// Account-wide rollup for the signed-in user.
+app.get('/api/me/rollup', async (req, res) => {
+  const session = getSession(req);
+  if (!session) return res.status(401).json({ error: 'Not signed in.' });
+  if (DEMO) {
+    const { demoRollup } = await import('./demoData.js');
+    return res.json({ battletag: session.battletag, ...demoRollup });
+  }
+  try {
+    await real();
+    res.json({ battletag: session.battletag, ...(await account.accountRollup(session.accountId)) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 async function findCharacter(realm, name) {
   const { rows } = await db.query(

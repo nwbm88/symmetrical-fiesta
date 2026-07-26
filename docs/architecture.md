@@ -24,11 +24,14 @@ Mounts and toys are account-wide; most achievements are per-character. The schem
 `character_progress` so you can compute both correctly. For a true account view later, group
 characters under an account id (add an `accounts` table) once you add Battle.net login.
 
-## Reading a user's OWN collection (later)
-Client-credentials only sees public data. To let users log in and see everything:
-1. Register a redirect URL on develop.battle.net.
-2. Implement OAuth Authorization Code flow (scope `wow.profile`).
-3. Call `/profile/user/wow` with the user token to list their characters automatically.
+## Reading a user's OWN collection (implemented)
+Client-credentials only sees public data. `src/auth/routes.js` implements the OAuth
+Authorization Code flow (scope `wow.profile`): `/auth/login` → Battle.net →
+`/auth/callback` exchanges the code, reads the battletag from `/userinfo`, lists all
+characters via `/profile/user/wow`, links them to an `accounts` row, and starts an
+in-memory cookie session. `/api/me` returns the character list; `/api/me/rollup`
+(logic/account.js) unions progress across the account's synced characters. Sessions
+are in-memory — fine single-process; add a store if you scale out.
 
 ## Postgres vs SQLite
 The scaffold uses Postgres (`pg`). To prototype with zero setup, SQLite works too — swap `src/db.js`

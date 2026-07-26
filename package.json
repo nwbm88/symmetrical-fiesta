@@ -11,7 +11,11 @@
     "db:seed": "psql \"$DATABASE_URL\" -f db/seed_guides.sql",
     "demo": "DEMO=1 node src/api/server.js",
     "ingest:static": "node src/ingest/staticData.js",
+    "ingest:enrich": "node src/ingest/enrichDetails.js",
     "ingest:character": "node src/ingest/characterProgress.js",
+    "import:locations": "node src/sources/locationsCsv.js",
+    "refresh": "node src/ingest/staticData.js && node src/ingest/enrichDetails.js",
+    "test": "node --test",
     "start": "node src/api/server.js"
   },
   "dependencies": {

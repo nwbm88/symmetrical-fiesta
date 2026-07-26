@@ -66,6 +66,14 @@ CREATE INDEX IF NOT EXISTS idx_locations_lookup ON locations (collectible_type, 
 
 -- ---------- Per-user / per-character data (fetched on demand, cached) ----------
 
+-- A Battle.net account (created on "Sign in with Battle.net"). Groups characters
+-- for the account-wide rollup view.
+CREATE TABLE IF NOT EXISTS accounts (
+  id         SERIAL PRIMARY KEY,
+  battletag  TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS characters (
   id          SERIAL PRIMARY KEY,
   region      TEXT NOT NULL,
@@ -88,3 +96,11 @@ CREATE TABLE IF NOT EXISTS character_progress (
   PRIMARY KEY (character_id, kind, collectible_id)
 );
 CREATE INDEX IF NOT EXISTS idx_progress_char ON character_progress (character_id, completed);
+
+-- ---------- Idempotent migrations (safe to re-run; keeps db:init as the one command) ----------
+ALTER TABLE characters   ADD COLUMN IF NOT EXISTS account_id INTEGER REFERENCES accounts(id);
+ALTER TABLE achievements ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE mounts       ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE mounts       ADD COLUMN IF NOT EXISTS source_type TEXT;  -- DROP/VENDOR/QUEST/... from Blizzard
+ALTER TABLE toys         ADD COLUMN IF NOT EXISTS item_id INTEGER;
+ALTER TABLE toys         ADD COLUMN IF NOT EXISTS source_type TEXT;

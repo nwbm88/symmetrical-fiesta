@@ -81,6 +81,16 @@ a { color: var(--accent); }
 }
 .lookup button:hover { filter: brightness(1.08); }
 
+/* ---------- auth + character chips ---------- */
+.auth { display: flex; align-items: center; gap: 10px; }
+.auth .tag { font-weight: 600; color: var(--ink-2); }
+.mychars {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  max-width: 980px; margin: 14px auto 0; padding: 0 24px;
+}
+.chip-gold { color: var(--gold); border-color: var(--gold); }
+.chip-gold:hover { background: var(--gold); color: #1a1a19; }
+
 /* ---------- layout ---------- */
 main { max-width: 980px; margin: 0 auto; padding: 28px 24px 48px; }
 .empty { text-align: center; padding: 72px 0 48px; }
@@ -115,6 +125,11 @@ main { max-width: 980px; margin: 0 auto; padding: 28px 24px 48px; }
   padding: 8px 14px 10px; cursor: pointer;
 }
 .tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabs #filter {
+  margin-left: auto; align-self: center;
+  font: inherit; font-size: 13px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--baseline); border-radius: 999px; padding: 5px 14px; width: 170px;
+}
 
 /* ---------- closest list ---------- */
 .row {

@@ -24,6 +24,23 @@ export const demoCharacter = {
   ],
 };
 
+// Account-wide rollup (union across the demo account's three characters).
+export const demoRollup = {
+  progression: {
+    achievements: { have: 3012, total: 4322, percent: 69.7 },
+    mounts: { have: 412, total: 953, percent: 43.2 },
+    toys: { have: 589, total: 1219, percent: 48.3 },
+  },
+  closest: [
+    { id: 12909, name: 'Mount Armada', current_amount: 393, required_amount: 400, percent: 98.3, has_guide: false },
+    { id: 40724, name: 'Toybox Tycoon', current_amount: 389, required_amount: 400, percent: 97.3, has_guide: false },
+    { id: 2144, name: "What a Long, Strange Trip It's Been", current_amount: 7, required_amount: 8, percent: 87.5, has_guide: false },
+    { id: 1956, name: 'Higher Learning', current_amount: 7, required_amount: 8, percent: 87.5, has_guide: false },
+    { id: 19458, name: 'Glory of the Dream Raider', current_amount: 11, required_amount: 13, percent: 84.6, has_guide: false },
+  ],
+  proxy_char: { realm: 'proudmoore', name: 'demo' },
+};
+
 export const demoMissing = {
   mount: [
     { id: 363, name: "Invincible's Reins", source: 'Drop: The Lich King (25H), Icecrown Citadel — ~1%', has_guide: true },

@@ -9,10 +9,13 @@ const API_HOST = REGION === 'cn'
   : `https://${REGION}.api.blizzard.com`;
 
 // Namespaces tell Blizzard which data set to return.
+// GAME_VERSION=retail (default) | classic (Cata/MoP progression) | classic1x (Era).
+const GAME = process.env.GAME_VERSION || 'retail';
+const FLAVOR = GAME === 'retail' ? '' : `-${GAME}`;
 export const NS = {
-  static: `static-${REGION}`,   // game data (achievements, mounts, toys)
-  profile: `profile-${REGION}`, // character data
-  dynamic: `dynamic-${REGION}`,
+  static: `static${FLAVOR}-${REGION}`,   // game data (achievements, mounts, toys)
+  profile: `profile${FLAVOR}-${REGION}`, // character data
+  dynamic: `dynamic${FLAVOR}-${REGION}`,
 };
 
 let lastCall = 0;
