@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["engine", "src-tauri"]
+
+[profile.release]
+lto = true
+codegen-units = 1

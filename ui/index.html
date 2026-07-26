@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClearWave</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="1" y="1" width="22" height="22" rx="5" fill="#0e2233"/>
+        <path d="M4.5 12h1.6M7.6 12V8.2M7.6 12v3.8M10.7 12V5.4M10.7 12v6.6M13.8 12V7.2M13.8 12v4.8M16.9 12V9.4M16.9 12v2.6M19.5 12h-1" stroke="#4dd7ff" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>ClearWave</h1>
+        <span class="tagline">restore &amp; remaster — 100% local</span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="tools" id="tool-badges" title="Optional external tools detected on this PC">
+        <span class="tool-badge" id="tool-ffmpeg">ffmpeg</span>
+        <span class="tool-badge" id="tool-deepfilter">DeepFilterNet</span>
+        <span class="tool-badge" id="tool-demucs">Demucs</span>
+      </div>
+      <button id="btn-load-preset" class="btn">Load preset</button>
+      <button id="btn-save-preset" class="btn">Save preset</button>
+      <button id="btn-bypass" class="btn btn-ab" title="Hold to compare with the untouched original (or click to toggle)">A/B&nbsp;Original</button>
+    </div>
+  </header>
+
+  <main id="layout">
+    <!-- ============ left: album queue + export ============ -->
+    <aside id="sidebar">
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Album tracks</h2>
+          <button id="btn-add-tracks" class="btn btn-accent btn-sm">+ Add</button>
+        </div>
+        <ul id="track-list" class="track-list">
+          <li class="empty-hint">Add the tracks of your album here.<br/>Click one to open it in the editor.</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Export</h2></div>
+        <div class="field">
+          <label>Output folder</label>
+          <div class="row">
+            <input id="out-dir" type="text" placeholder="Choose a folder…" readonly />
+            <button id="btn-out-dir" class="btn btn-sm">…</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Format</label>
+          <select id="out-format">
+            <option value="wav">WAV (24-bit, always available)</option>
+            <option value="flac">FLAC (needs ffmpeg)</option>
+            <option value="mp3">MP3 (needs ffmpeg)</option>
+            <option value="m4a">M4A / AAC (needs ffmpeg)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Deep clean (external AI, optional)</label>
+          <select id="ai-external">
+            <option value="">Off — use built-in AI denoise only</option>
+            <option value="deepfilter">DeepFilterNet (deep-filter)</option>
+            <option value="custom">Custom command…</option>
+          </select>
+          <input id="ai-custom-cmd" type="text" class="hidden" placeholder='mytool "{in}" -o "{out}"  (or {outdir})' />
+          <p class="hint">Runs before the chain during export/batch. Everything stays on this PC.</p>
+        </div>
+        <div class="export-buttons">
+          <button id="btn-export-one" class="btn">Export current track</button>
+          <button id="btn-export-all" class="btn btn-accent">Remaster whole album</button>
+          <button id="btn-cancel-batch" class="btn btn-danger hidden">Cancel batch</button>
+        </div>
+        <div id="batch-progress" class="hidden">
+          <div class="progress"><div id="batch-bar"></div></div>
+          <p id="batch-label" class="hint"></p>
+        </div>
+      </section>
+    </aside>
+
+    <!-- ============ main editor ============ -->
+    <section id="editor">
+      <section class="panel" id="wave-panel">
+        <div class="wave-head">
+          <div>
+            <h2 id="track-title">No track loaded</h2>
+            <span id="track-sub" class="hint"></span>
+          </div>
+          <div class="transport">
+            <span id="time-now" class="time">0:00.0</span>
+            <button id="btn-play" class="btn btn-play" disabled>▶</button>
+            <span id="time-total" class="time">0:00.0</span>
+          </div>
+        </div>
+        <canvas id="waveform" height="140"></canvas>
+        <div id="load-overlay" class="hidden"><div class="spinner"></div><span id="load-msg">Decoding + AI analysis…</span></div>
+      </section>
+
+      <div id="modules">
+        <!-- AI denoise -->
+        <section class="panel module" data-module="denoise">
+          <div class="panel-head">
+            <h2>AI Denoise <span class="chip">neural · local</span></h2>
+          </div>
+          <div class="field">
+            <label>Amount <output id="o-denoise">0%</output></label>
+            <input type="range" id="p-denoise" min="0" max="100" value="0" step="1" />
+          </div>
+          <p class="hint">RNNoise neural network, precomputed per track — drag while playing to hear it blend in real time.</p>
+        </section>
+
+        <!-- HPF -->
+        <section class="panel module">
+          <div class="panel-head">
+            <h2>Rumble Filter</h2>
+            <label class="switch"><input type="checkbox" id="p-hpf-on" checked /><span></span></label>
+          </div>
+          <div class="field">
+            <label>High-pass <output id="o-hpf">30 Hz</output></label>
+            <input type="range" id="p-hpf" min="20" max="200" value="30" step="1" />
+          </div>
+          <p class="hint">Cuts sub-bass rumble, mic thumps and mud.</p>
+        </section>
+
+        <!-- EQ -->
+        <section class="panel module module-wide">
+          <div class="panel-head">
+            <h2>Equalizer</h2>
+            <label class="switch"><input type="checkbox" id="p-eq-on" /><span></span></label>
+          </div>
+          <div class="eq-grid">
+            <div class="eq-band">
+              <input type="range" class="vert" id="p-eq-ls" min="-12" max="12" value="0" step="0.5" />
+              <output id="o-eq-ls">0</output>
+              <input type="number" id="p-eq-ls-f" value="120" min="30" max="500" step="10" />
+              <label>Low shelf</label>
+            </div>
+            <div class="eq-band">
+              <input type="range" class="vert" id="p-eq-p1" min="-12" max="12" value="0" step="0.5" />
+              <output id="o-eq-p1">0</output>
+              <input type="number" id="p-eq-p1-f" value="250" min="60" max="2000" step="10" />
+              <label>Peak 1</label>
+            </div>
+            <div class="eq-band">
+              <input type="range" class="vert" id="p-eq-p2" min="-12" max="12" value="0" step="0.5" />
+              <output id="o-eq-p2">0</output>
+              <input type="number" id="p-eq-p2-f" value="1000" min="200" max="8000" step="50" />
+              <label>Peak 2</label>
+            </div>
+            <div class="eq-band">
+              <input type="range" class="vert" id="p-eq-p3" min="-12" max="12" value="0" step="0.5" />
+              <output id="o-eq-p3">0</output>
+              <input type="number" id="p-eq-p3-f" value="4000" min="800" max="16000" step="100" />
+              <label>Peak 3</label>
+            </div>
+            <div class="eq-band">
+              <input type="range" class="vert" id="p-eq-hs" min="-12" max="12" value="0" step="0.5" />
+              <output id="o-eq-hs">0</output>
+              <input type="number" id="p-eq-hs-f" value="8000" min="2000" max="18000" step="100" />
+              <label>High shelf</label>
+            </div>
+          </div>
+          <p class="hint">Gain in dB per band; the number below each slider is its frequency in Hz.</p>
+        </section>
+
+        <!-- Compressor -->
+        <section class="panel module">
+          <div class="panel-head">
+            <h2>Compressor</h2>
+            <label class="switch"><input type="checkbox" id="p-comp-on" /><span></span></label>
+          </div>
+          <div class="field"><label>Threshold <output id="o-th">-18 dB</output></label>
+            <input type="range" id="p-th" min="-48" max="0" value="-18" step="1" /></div>
+          <div class="field"><label>Ratio <output id="o-ratio">2.5:1</output></label>
+            <input type="range" id="p-ratio" min="1" max="10" value="2.5" step="0.1" /></div>
+          <div class="field"><label>Attack <output id="o-att">15 ms</output></label>
+            <input type="range" id="p-att" min="1" max="100" value="15" step="1" /></div>
+          <div class="field"><label>Release <output id="o-rel">150 ms</output></label>
+            <input type="range" id="p-rel" min="20" max="800" value="150" step="5" /></div>
+          <div class="field"><label>Makeup <output id="o-mk">0 dB</output></label>
+            <input type="range" id="p-mk" min="0" max="18" value="0" step="0.5" /></div>
+          <div class="gr-meter"><label>GR</label><div class="meter"><div id="m-gr"></div></div></div>
+        </section>
+
+        <!-- Loudness -->
+        <section class="panel module">
+          <div class="panel-head">
+            <h2>Loudness <span class="chip">EBU R128</span></h2>
+            <label class="switch"><input type="checkbox" id="p-loud-on" checked /><span></span></label>
+          </div>
+          <div class="field">
+            <label>Target <output id="o-lufs">-14.0 LUFS</output></label>
+            <input type="range" id="p-lufs" min="-24" max="-8" value="-14" step="0.5" />
+          </div>
+          <p id="loud-info" class="hint">Every exported track lands at the same loudness — no more volume jumps between songs.</p>
+        </section>
+
+        <!-- Output -->
+        <section class="panel module">
+          <div class="panel-head"><h2>Output</h2></div>
+          <div class="field"><label>Trim <output id="o-trim">0 dB</output></label>
+            <input type="range" id="p-trim" min="-12" max="12" value="0" step="0.5" /></div>
+          <div class="field"><label>Limiter ceiling <output id="o-ceil">-1.0 dB</output></label>
+            <input type="range" id="p-ceil" min="-3" max="0" value="-1" step="0.1" /></div>
+          <div class="meters">
+            <div class="meter-row"><label>L</label><div class="meter"><div id="m-l"></div></div></div>
+            <div class="meter-row"><label>R</label><div class="meter"><div id="m-r"></div></div></div>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <footer id="statusbar"><span id="status-msg">Ready. Add tracks to begin.</span></footer>
+
+  <script src="main.js"></script>
+</body>
+</html>
