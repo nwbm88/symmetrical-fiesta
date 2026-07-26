@@ -100,6 +100,20 @@ only; the audio itself is never touched.
 The waveform is decoded once with ffmpeg and cached (`audio/peaks.json`), so
 re-opening a long show is instant.
 
+### Audio preview
+
+Click anywhere on the waveform to seek, press Play to listen, click a row in
+the track table to jump to that song — placing cuts by ear is usually faster
+than by eye.
+
+Playback uses Qt Multimedia when the machine has a working audio device, and
+falls back to driving `ffplay` (bundled with ffmpeg) when it doesn't. The
+fallback also kicks in automatically if Qt *claims* to be playing but the
+playhead doesn't actually keep up — Qt reports success in that case and plays
+nothing, which would otherwise leave you with a Play button that does nothing.
+If neither backend is usable the button is disabled and its tooltip says why,
+rather than looking available and staying silent.
+
 ### When the tracklist disagrees with the audio
 
 A setlist posted in the comments sometimes belongs to a *different, longer*

@@ -22,7 +22,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QUrl, QRectF
+from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtCore import QPointF
 from PySide6.QtWidgets import (
@@ -33,6 +33,9 @@ from PySide6.QtWidgets import (
 
 PEAK_RATE = 25          # envelope buckets per second (40 ms resolution)
 DECODE_RATE = 4000      # Hz mono used for peak extraction
+
+WATCHDOG_MS = 2500      # how long to watch new playback before judging it
+MIN_PLAYBACK_RATE = 0.33  # fraction of real time below which it is broken
 
 
 # ------------------------------------------------------------------ workers
@@ -475,6 +478,10 @@ class TimelineDialog(QDialog):
         except Exception:
             pass
         self.duration = duration
+        if self.player is not None:
+            # created before the length was known (ffplay needs it to know
+            # where the end of the show is)
+            self.player.duration = duration
         self.view.set_audio(peaks, duration)
         self.markers = [m for m in self.markers if m < duration]
         self.titles = self.titles[:len(self.markers) + 1] or [""]
@@ -486,40 +493,84 @@ class TimelineDialog(QDialog):
 
     # ------------------------------------------------------------- playback
 
-    def _setup_playback(self):
-        self.player = None
-        try:
-            from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
-            self.player = QMediaPlayer(self)
-            self._audio_out = QAudioOutput(self)
-            self.player.setAudioOutput(self._audio_out)
-            self.player.setSource(QUrl.fromLocalFile(str(self.master.resolve())))
+    def _setup_playback(self, prefer_ffplay=False):
+        from .playback import create_player
+        self._last_pos = getattr(self, "_last_pos", 0.0)
+        self._play_from = getattr(self, "_play_from", 0.0)
+        self._tried_fallback = prefer_ffplay
+        self.player, reason = create_player(self.master, self.duration, self,
+                                            prefer_ffplay=prefer_ffplay)
+        # Qt can claim to be playing while nothing actually comes out and the
+        # position never moves (no working backend for the format, an audio
+        # server that accepts but discards, a device grabbed exclusively by
+        # another app).  Watch the first couple of seconds and switch to
+        # ffplay if the playhead never budges.
+        self._watchdog = QTimer(self)
+        self._watchdog.setSingleShot(True)
+        self._watchdog.setInterval(WATCHDOG_MS)
+        self._watchdog.timeout.connect(self._check_stalled)
+
+        if self.player:
             self.player.positionChanged.connect(self._pos_changed)
+            self.player.stateChanged.connect(self._play_state_changed)
             self.play_btn.setEnabled(True)
-        except Exception:
-            self.play_btn.setToolTip("audio playback unavailable "
-                                     "(Qt Multimedia backend missing)")
+            self.play_btn.setToolTip(
+                "Playing through ffplay." if self.player.backend == "ffplay"
+                else "")
+        else:
+            self.play_btn.setEnabled(False)
+            self.play_btn.setToolTip(reason)
+
+    def _check_stalled(self):
+        if (not self.player or self._tried_fallback
+                or not self.player.is_playing()):
+            return
+        # Healthy playback advances roughly in step with the wall clock.
+        # Anything slower than a third of real time is broken, not merely
+        # slow — that covers a frozen playhead and a crawling one alike,
+        # while leaving plenty of headroom for ordinary jitter.
+        advanced = self._last_pos - self._play_from
+        if advanced >= MIN_PLAYBACK_RATE * WATCHDOG_MS / 1000.0:
+            return          # playing fine
+        from .playback import ffplay_available
+        if not ffplay_available():
+            return
+        resume_at = self._play_from
+        self.player.stop()
+        self.player.deleteLater()
+        self._setup_playback(prefer_ffplay=True)
+        if self.player:
+            self.player.duration = self.duration
+            self.player.set_position(resume_at)
+            self._play_from = resume_at
+            self.player.play()
+
+    def _play_state_changed(self, playing: bool):
+        self.play_btn.setText("⏸ Pause" if playing else "▶ Play")
 
     def _toggle_play(self):
         if not self.player:
             return
-        from PySide6.QtMultimedia import QMediaPlayer
-        if self.player.playbackState() == QMediaPlayer.PlayingState:
+        if self.player.is_playing():
             self.player.pause()
-            self.play_btn.setText("▶ Play")
+            self._watchdog.stop()
         else:
+            self._play_from = self._last_pos
             self.player.play()
-            self.play_btn.setText("⏸ Pause")
+            if self.player.backend == "Qt" and not self._tried_fallback:
+                self._watchdog.start()
 
     def seek(self, seconds):
         if self.player:
-            self.player.setPosition(int(seconds * 1000))
+            self.player.set_position(seconds)
+        self._last_pos = self._play_from = seconds
         self.view.set_playhead(seconds)
         self.time_label.setText(f"{_hms(seconds)} / {_hms(self.duration)}")
 
-    def _pos_changed(self, ms):
-        self.view.set_playhead(ms / 1000.0)
-        self.time_label.setText(f"{_hms(ms / 1000.0)} / {_hms(self.duration)}")
+    def _pos_changed(self, seconds):
+        self._last_pos = seconds
+        self.view.set_playhead(seconds)
+        self.time_label.setText(f"{_hms(seconds)} / {_hms(self.duration)}")
 
     # ------------------------------------------------------- marker editing
 
