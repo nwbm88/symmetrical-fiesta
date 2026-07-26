@@ -1,0 +1,20 @@
+{
+  "name": "wow-collection-tracker",
+  "version": "0.1.0",
+  "description": "Self-hosted WoW achievement, mount & toy hunting tracker. Stores game data locally so you never depend on out-of-date sites.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "db:init": "psql \"$DATABASE_URL\" -f db/schema.sql",
+    "ingest:static": "node src/ingest/staticData.js",
+    "ingest:character": "node src/ingest/characterProgress.js",
+    "start": "node src/api/server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.11.5"
+  }
+}
