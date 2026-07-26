@@ -8,7 +8,7 @@
   },
   "scripts": {
     "db:init": "psql \"$DATABASE_URL\" -f db/schema.sql",
-    "db:seed": "psql \"$DATABASE_URL\" -f db/seed_guides.sql",
+    "db:seed": "node src/sources/guideSeed.js",
     "demo": "DEMO=1 node src/api/server.js",
     "ingest:static": "node src/ingest/staticData.js",
     "ingest:enrich": "node src/ingest/enrichDetails.js",

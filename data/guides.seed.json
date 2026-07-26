@@ -1,0 +1,266 @@
+{
+  "comment": "Guide + location dataset. Single source of truth: demo mode serves it directly; `npm run db:seed` loads it into Postgres. Names are Blizzard COLLECTION-JOURNAL names (what ingest:static stores); `id` is the Blizzard mount/toy/achievement id when known (skips name lookup). Coordinates are 0-100 in-game map coords; entrance pins are approximate. Verified against retail 12.0.7 (July 2026): all content below is legacy/evergreen and unchanged by Midnight.",
+  "game_version_checked": "12.0.7",
+  "entries": [
+    {
+      "kind": "mount", "name": "Invincible", "id": 363,
+      "guide": "**Weekly routine — 10 minutes.**\n1. Fly to Icecrown Citadel in Icecrown (Northrend).\n2. Set raid difficulty to **25 Heroic** before entering.\n3. Clear to The Lich King (use the teleporter network to skip wings).\n4. Kill him — ~1% personal drop.\n\n*Once per character per week — bring alts.*",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "The Lich King", "zone": "Icecrown Citadel, Icecrown", "map_id": 118, "x": 75.2, "y": 21.5, "note": "Raid entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Mimiron's Head", "id": 304,
+      "guide": "**Weekly Ulduar run.**\n1. Enter Ulduar (The Storm Peaks) on **25-player**.\n2. Activate **no Keepers** — the mount only drops from zero-Keeper Yogg-Saron.\n3. Enter the portals in phase 2 to finish the fight; ~1% drop.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Yogg-Saron", "zone": "Ulduar, The Storm Peaks", "map_id": 120, "x": 41.6, "y": 17.8, "note": "Raid entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Ashes of Al'ar", "id": 183,
+      "guide": "**Weekly Tempest Keep run.**\n1. Fly to Tempest Keep in Netherstorm (Outland) — The Eye is the central structure.\n2. Clear to Kael'thas Sunstrider (final boss); everything solos trivially.\n3. ~2% drop, once per character per week.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Kael'thas Sunstrider", "zone": "Tempest Keep, Netherstorm", "map_id": 109, "x": 73.9, "y": 63.6, "note": "Raid entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Onyxian Drake", "id": 349,
+      "guide": "**Fastest weekly lockout in the game.**\n1. Onyxia's Lair is inside the Wyrmbog cave, Dustwallow Marsh (Kalimdor).\n2. One boss, ~60 seconds at max level.\n3. ~1% drop — a classic run-it-forever mount.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Onyxia", "zone": "Onyxia's Lair, Dustwallow Marsh", "map_id": 70, "x": 52.2, "y": 76.5, "note": "Lair entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Time-Lost Proto-Drake", "id": 265,
+      "guide": "**Camping a rare spawn.** The Time-Lost Proto-Drake shares spawn points, routes, and its timer with Vyragosa — the leading theory is that TLPD is the *rare version* of a Vyragosa spawn.\n1. It uses **four** spawn points (pins below); after either dragon dies, nothing spawns for ~6 hours (observed 6–22h).\n2. Park an alt at a pin, keybind `/tar Time-Lost`.\n3. Frozen Lake usually patrols clockwise; the other three counter-clockwise.\n4. Engage the moment you see it — it evades and despawns easily.",
+      "source_name": "Warcraft Wiki (CC BY-SA 4.0)", "source_url": "https://warcraft.wiki.gg/wiki/Time-Lost_Proto-Drake",
+      "locations": [
+        { "npc_name": "Time-Lost Proto-Drake", "zone": "The Storm Peaks", "map_id": 120, "x": 31, "y": 69, "note": "Frozen Lake spawn (usually clockwise)" },
+        { "npc_name": "Time-Lost Proto-Drake", "zone": "The Storm Peaks", "map_id": 120, "x": 51, "y": 70, "note": "Waterfall spawn" },
+        { "npc_name": "Time-Lost Proto-Drake", "zone": "The Storm Peaks", "map_id": 120, "x": 35, "y": 76, "note": "Brunnhildar spawn" },
+        { "npc_name": "Time-Lost Proto-Drake", "zone": "The Storm Peaks", "map_id": 120, "x": 52, "y": 34, "note": "Ulduar Ravine spawn" }
+      ]
+    },
+    {
+      "kind": "mount", "name": "Phosphorescent Stone Drake",
+      "guide": "**Aeonaxx — the mount you fight in mid-air.**\n1. Aeonaxx spawns friendly at six points circling the Temple of Earth in Deepholm (pins below), shares a 6–22h timer with the rare Blood Seeker, and is only ~6% of that timer's spawns.\n2. Fly to it and **mount it like a vehicle** — it turns hostile and the fight happens on its back.\n3. Kill the Young Stone Drakes it summons, finish Aeonaxx, parachute down, loot the reins.\n4. `/tar Aeonaxx` macro while camping; it circles its spawn point slowly.",
+      "source_name": "Warcraft Wiki (CC BY-SA 4.0)", "source_url": "https://warcraft.wiki.gg/wiki/Aeonaxx",
+      "locations": [
+        { "npc_name": "Aeonaxx", "zone": "Deepholm", "map_id": 207, "x": 42, "y": 47, "note": "NW spawn 1" },
+        { "npc_name": "Aeonaxx", "zone": "Deepholm", "map_id": 207, "x": 44, "y": 43, "note": "NW spawn 2" },
+        { "npc_name": "Aeonaxx", "zone": "Deepholm", "map_id": 207, "x": 51, "y": 43, "note": "NE spawn" },
+        { "npc_name": "Aeonaxx", "zone": "Deepholm", "map_id": 207, "x": 42, "y": 60, "note": "SW spawn 1" },
+        { "npc_name": "Aeonaxx", "zone": "Deepholm", "map_id": 207, "x": 47, "y": 57, "note": "SW spawn 2" },
+        { "npc_name": "Aeonaxx", "zone": "Deepholm", "map_id": 207, "x": 52, "y": 64, "note": "SE spawn" }
+      ]
+    },
+    {
+      "kind": "mount", "name": "Pureblood Fire Hawk",
+      "guide": "**Weekly Firelands run.**\n1. Enter Firelands at Sulfuron Spire, Mount Hyjal.\n2. Clear to **Ragnaros** (Alysrazor and Ragnaros can be reached in one lap).\n3. ~1% drop from Ragnaros on any raid size.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Ragnaros", "zone": "Firelands, Mount Hyjal", "map_id": 198, "x": 47.3, "y": 78.0, "note": "Raid entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Flametalon of Alysrazor",
+      "guide": "**Same lockout as the Fire Hawk — do both.**\n1. In Firelands, take the left path to **Alysrazor**.\n2. Skip her flight phase entirely at max level — burst her down.\n3. ~1% drop; pair with a Ragnaros kill every week.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Alysrazor", "zone": "Firelands, Mount Hyjal", "map_id": 198, "x": 47.3, "y": 78.0, "note": "Raid entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Blazing Drake",
+      "guide": "**Weekly Dragon Soul run.**\n1. Enter Dragon Soul via the Caverns of Time, Tanaris.\n2. Kill **Madness of Deathwing** (last boss) on Normal or Heroic.\n3. ~1% drop. The same run can award Experiment 12-B from Ultraxion — check both.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Madness of Deathwing", "zone": "Caverns of Time, Tanaris", "map_id": 71, "x": 64.9, "y": 49.8, "note": "Caverns of Time entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Experiment 12-B",
+      "guide": "**Same Dragon Soul lockout as the Blazing Drake.**\n1. **Ultraxion** is the 5th boss — the fight is a stand-and-hit patchwerk.\n2. Press the extra-action button if Hour of Twilight would otherwise kill you (it won't at max level).\n3. ~1% drop; continue to Madness afterward for the Blazing Drake roll.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Ultraxion", "zone": "Caverns of Time, Tanaris", "map_id": 71, "x": 64.9, "y": 49.8, "note": "Caverns of Time entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Life-Binder's Handmaiden",
+      "guide": "**Heroic-only Dragon Soul drop.**\n1. Set Dragon Soul to **Heroic** before Madness of Deathwing.\n2. Heroic Madness has one extra platform mechanic; still trivial at max level.\n3. ~1% drop, same lockout as the Blazing Drake (Heroic covers both).",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Madness of Deathwing", "zone": "Caverns of Time, Tanaris", "map_id": 71, "x": 64.9, "y": 49.8, "note": "Caverns of Time entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Azure Drake",
+      "guide": "**Weekly Eye of Eternity run.**\n1. The Eye of Eternity is in the Nexus complex, Coldarra (Borean Tundra).\n2. Kill **Malygos** — phase 3 puts you on a drake; spam ability 1.\n3. Azure Drake and Blue Drake both roll from the same kill (10 or 25 player).",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Malygos", "zone": "Eye of Eternity, Coldarra, Borean Tundra", "map_id": 114, "x": 27.5, "y": 26.5, "note": "Nexus complex (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Blue Drake",
+      "guide": "**Same lockout as the Azure Drake.**\n1. Kill Malygos in the Eye of Eternity (Coldarra, Borean Tundra).\n2. Both drakes drop from the same weekly kill — one run, two chances.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Malygos", "zone": "Eye of Eternity, Coldarra, Borean Tundra", "map_id": 114, "x": 27.5, "y": 26.5, "note": "Nexus complex (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Grand Black War Mammoth",
+      "guide": "**Four rolls per week.**\n1. Vault of Archavon sits in the Wintergrasp fortress (Northrend).\n2. **Every boss** (Archavon, Emalon, Koralon, Toravon) can drop it, on 10 AND 25 — that's up to 8 rolls weekly per character.\n3. Very low chance (~1%), near-zero effort.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Vault of Archavon", "zone": "Wintergrasp", "map_id": 123, "x": 50.0, "y": 16.5, "note": "Fortress interior (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Big Love Rocket",
+      "guide": "**Seasonal — Love is in the Air (February).**\n1. Queue the holiday boss (Crown Chemical Co.) via the dungeon finder, or ride to Shadowfang Keep.\n2. The daily Heart-Shaped Box has a ~0.03% chance — the rarest mount drop in the game.\n3. Once per character per day during the event: alts matter more here than anywhere.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Midnight",
+      "guide": "**Return to Karazhan (Mythic, Legion version).**\n1. Enter Return to Karazhan in Deadwind Pass.\n2. **Attumen the Huntsman** is the first boss — under 5 minutes door-to-boss.\n3. ~1% drop (Midnight's Eternal Reins); weekly Mythic lockout, once per character.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Attumen the Huntsman", "zone": "Return to Karazhan, Deadwind Pass", "map_id": 42, "x": 46.9, "y": 74.8, "note": "Karazhan entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Smoldering Ember Wyrm",
+      "guide": "**Nightbane, the hidden boss of Return to Karazhan.**\n1. Complete a Medivh's-echo run to summon **Nightbane** in Return to Karazhan (Deadwind Pass) — clear to the Opera and follow the smoldering trail events.\n2. Nightbane drops the wyrm at a low rate; weekly Mythic lockout.\n3. Pair it with the Attumen/Midnight farm — same instance.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Nightbane", "zone": "Return to Karazhan, Deadwind Pass", "map_id": 42, "x": 46.9, "y": 74.8, "note": "Karazhan entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Rivendare's Deathcharger",
+      "guide": "**The original mount farm.**\n1. Enter Stratholme's main gate (Eastern Plaguelands), Undead side.\n2. Clear to **Baron Rivendare** in Slaughter Square.\n3. ~1% drop, no lockout at max level — reset and repeat up to 10 instances/hour.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Baron Rivendare", "zone": "Stratholme, Eastern Plaguelands", "map_id": 23, "x": 27.0, "y": 12.0, "note": "Main gate (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Raven Lord",
+      "guide": "**Anzu, Sethekk Halls (Heroic).**\n1. Sethekk Halls is in Auchindoun, Terokkar Forest (Outland).\n2. Set the dungeon to **Heroic** — Anzu only appears on Heroic.\n3. ~1% drop, no daily limit at max level beyond the 10/hour instance cap.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Anzu", "zone": "Sethekk Halls, Auchindoun, Terokkar Forest", "map_id": 108, "x": 44.5, "y": 65.8, "note": "Auchindoun entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Swift White Hawkstrider",
+      "guide": "**Kael'thas round two — Magisters' Terrace (Heroic).**\n1. Magisters' Terrace is on the Isle of Quel'Danas.\n2. Heroic mode, clear to Kael'thas Sunstrider; ~4 minutes a run.\n3. ~4% drop — one of the better odds among classic farm mounts.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Kael'thas Sunstrider", "zone": "Magisters' Terrace, Isle of Quel'Danas", "map_id": 122, "x": 61.2, "y": 30.9, "note": "Dungeon entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Blue Proto-Drake",
+      "guide": "**Skadi the Ruthless, Utgarde Pinnacle (Heroic).**\n1. Utgarde Pinnacle is the upper instance of the Utgarde Keep complex, Howling Fjord.\n2. Heroic mode; Skadi is the third boss — kill his drake phase fast by using the harpoons once.\n3. ~1% drop, instance-cap limited only.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Skadi the Ruthless", "zone": "Utgarde Pinnacle, Howling Fjord", "map_id": 117, "x": 57.3, "y": 46.8, "note": "Utgarde Keep complex (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Vitreous Stone Drake",
+      "guide": "**Slabhide, The Stonecore.**\n1. The Stonecore entrance is high on the Temple of Earth spire in Deepholm.\n2. Slabhide is the second boss; skippable trash if you hug the left wall.\n3. ~1% drop, farmable back-to-back at max level.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Slabhide", "zone": "The Stonecore, Deepholm", "map_id": 207, "x": 47.4, "y": 51.9, "note": "Temple of Earth spire (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Drake of the North Wind",
+      "guide": "**Altairus, The Vortex Pinnacle.**\n1. The Vortex Pinnacle floats off Uldum's southern coast — flying mount required.\n2. Altairus is the second boss; the instance is 5 minutes end to end.\n3. ~1% drop, farmable repeatedly.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Altairus", "zone": "The Vortex Pinnacle, Uldum", "map_id": 249, "x": 76.8, "y": 84.5, "note": "Floating instance off the coast (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Armored Razzashi Raptor",
+      "guide": "**Zul'Gurub double farm — raptor + panther in one clear.**\n1. Enter Zul'Gurub in Northern Stranglethorn.\n2. **Bloodlord Mandokir** drops the raptor (~1%).\n3. Continue to High Priestess Kilnara for the Swift Zulian Panther on the same run.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Bloodlord Mandokir", "zone": "Zul'Gurub, Northern Stranglethorn", "map_id": 50, "x": 71.8, "y": 33.4, "note": "ZG entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Swift Zulian Panther",
+      "guide": "**Same Zul'Gurub clear as the raptor.**\n1. **High Priestess Kilnara** is past Mandokir in Zul'Gurub (Northern Stranglethorn).\n2. ~1% drop; both ZG mounts farm on the same reset.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "High Priestess Kilnara", "zone": "Zul'Gurub, Northern Stranglethorn", "map_id": 50, "x": 71.8, "y": 33.4, "note": "ZG entrance (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Headless Horseman's Mount",
+      "guide": "**Seasonal — Hallow's End (late October).**\n1. Queue the Headless Horseman via the dungeon finder during the event.\n2. The daily loot-filled pumpkin has a low mount chance (~0.5%).\n3. Once per character per day — run every alt, every day of the event.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "White Polar Bear",
+      "guide": "**Daily bag gamble in The Storm Peaks.**\n1. Do the daily quests offered in **Brunnhildar Village** (you'll be turned into a Hyldnir there).\n2. Dailies reward a **Hyldnir Spoils** bag with a small chance of the bear.\n3. One shot per character per day — quick on a flying alt parked there.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Brunnhildar Village quest givers", "zone": "The Storm Peaks", "map_id": 120, "x": 49.8, "y": 64.9, "note": "Brunnhildar Village (approx.)" }]
+    },
+    {
+      "kind": "mount", "name": "Poseidus",
+      "guide": "**Roaming rare in Vashj'ir — or just buy it.**\n1. Poseidus patrols underwater routes through the Shimmering Expanse and Abyssal Depths.\n2. The Reins of Poseidus drop is **BoE** — it appears on the auction house, usually expensive.\n3. If camping: long respawn (12h+), so join a hunting group or check the AH weekly instead.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Voidtalon of the Dark Star",
+      "guide": "**The Edge of Reality portal hunt (Draenor).**\n1. Small purple **Edge of Reality** portals spawn at fixed points across Draenor zones (Shadowmoon Valley, Gorgrond, Talador, Spires of Arak, Nagrand).\n2. First person to click the portal gets ported and loots the mount from the ground — 100%, no fight.\n3. Portals despawn in minutes; camping groups and addons announce them. Patience game.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Long-Forgotten Hippogryph",
+      "guide": "**Five crystals, one zone, first-come-first-served.**\n1. Five **Ephemeral Crystals** spawn at random points around Azsuna (Broken Isles).\n2. Click all five before anyone else finishes their set — the fifth click summons the hippogryph for you.\n3. Crystals emit a distinct chime when you're near one; sound on, fly low.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Riddler's Mind-Worm",
+      "guide": "**A hidden page-chase across the world.**\n1. The chain starts with the **Page 9** collectible in Legion Dalaran and leads through hidden pages in cities and zones worldwide.\n2. Each page's flavor text riddles the next location; the final page awards the Mind-Worm.\n3. Doable in an afternoon with a guide open; all pages are always up.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Grey Riding Camel",
+      "guide": "**The Camel Hoarder hunt (Uldum).**\n1. Tiny **Mysterious Camel Figurines** spawn at set points across Uldum.\n2. Most crumble to dust; a lucky one teleports you to the Feralas caverns to fight **Dormus the Camel-Hoarder**.\n3. Dormus drops the reins **100%** — the grind is finding a live figurine first.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Silent Glider",
+      "guide": "**Soundless, a rare in Nazjatar.**\n1. **Soundless** patrols the open water on Nazjatar's eastern side.\n2. ~2% drop, and the rare is on a multi-hour respawn shared across the shard.\n3. Check it whenever you pass through; join a group finder shard-hop to roll more often.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "mount", "name": "Son of Galleon", "id": 758,
+      "guide": "**Galleon, world boss of Valley of the Four Winds.**\n1. Galleon spawns near the Heartland farms; he dies in seconds to any group.\n2. Very low drop chance, once per character per week — a straight weekly roll.\n3. Park an alt nearby and tag him every reset.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Galleon", "zone": "Valley of the Four Winds", "map_id": 376, "x": 72.0, "y": 66.0, "note": "Spawn area near the Heartland (approx.)" }]
+    },
+
+    {
+      "kind": "toy", "name": "Piccolo of the Flaming Fire", "id": 13379,
+      "guide": "**Farm route.**\n1. Enter Stratholme's main gate (Eastern Plaguelands).\n2. **Hearthsinger Forresten** is a rare that can appear along the early streets — clear toward Festival Lane.\n3. ~3% when the rare is up; reset and re-run.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "Hearthsinger Forresten", "zone": "Stratholme, Eastern Plaguelands", "map_id": 23, "x": 27.0, "y": 12.0, "note": "Main gate (approx.)" }]
+    },
+    {
+      "kind": "toy", "name": "Orb of Deception", "id": 1973,
+      "guide": "**World drop — let gold do the farming.**\n1. Drops from almost any classic-era mob at a minuscule rate.\n2. Realistically: watch the **auction house**; it appears regularly and prices swing hard.\n3. Set a cheap buyout alert and wait.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "toy", "name": "Iron Boot Flask", "id": 44430,
+      "guide": "**Vendor buy — 10 Relics of Ulduar.**\n1. Relics of Ulduar drop from most Storm Peaks mobs (or the AH, cheap).\n2. Buy the flask from the Sons of Hodir quartermaster area at **K3** in The Storm Peaks.\n3. Five minutes total if you buy the relics.",
+      "source_name": "Original guide",
+      "locations": [{ "npc_name": "K3 vendor", "zone": "K3, The Storm Peaks", "map_id": 120, "x": 41.0, "y": 86.0, "note": "K3 base camp (approx.)" }]
+    },
+    {
+      "kind": "toy", "name": "Blazing Wings", "id": 122304,
+      "guide": "**Darkmoon Faire mini-game (first week of each month).**\n1. At the Faire, take the **Firebird's Challenge** from Ziggie Sparks near the carousel.\n2. Fly through 50 rings without touching the ground in one flight.\n3. Completing it awards the wings; retry tokens are cheap.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+
+    {
+      "kind": "achievement", "name": "What a Long, Strange Trip It's Been", "id": 2144,
+      "guide": "**The year-long holiday meta** — finish the meta-achievement of every major holiday:\n1. Love is in the Air (Feb), Noblegarden (Apr), Children's Week (May), Midsummer (Jun–Jul), Brewfest (Sep–Oct), Hallow's End (Oct–Nov), Pilgrim's Bounty (Nov), Winter Veil (Dec).\n2. Each holiday's meta takes 1–3 days of its window — missing one means waiting a year, so check this tracker when each event starts.\n3. Reward: **Violet Proto-Drake**.",
+      "source_name": "Original guide",
+      "locations": []
+    },
+    {
+      "kind": "achievement", "name": "Higher Learning", "id": 1956,
+      "guide": "**Read all eight \"Schools of Arcane Magic\" books in Dalaran (Northrend).**\n1. Each book has a fixed spot in a Dalaran building (Violet Citadel, Violet Gate, the Legerdemain Lounge upstairs, and others).\n2. Only one copy of each is up at a time; a read book despawns and takes **3–4 hours** to return — books all respawn on server restarts.\n3. Park a character in Dalaran and check spots between other farms.\n4. Reward: **Kirin Tor Familiar** pet.",
+      "source_name": "Warcraft Wiki (CC BY-SA 4.0)", "source_url": "https://warcraft.wiki.gg/wiki/Higher_Learning",
+      "locations": []
+    },
+    {
+      "kind": "achievement", "name": "Insane in the Membrane", "id": 2336,
+      "guide": "**The reputation marathon** — Exalted with Bloodsail Buccaneers AND all Steamwheedle cartel goblins, Ravenholdt, Darkmoon Faire.\n1. Order matters: do **Bloodsail** first (killing goblins), then repair goblin rep afterward via cloth/junk turn-ins.\n2. Ravenholdt needs mass Heavy Junkboxes — pickpocketing rogues charge for these on order boards.\n3. Budget weeks, not days. Title reward: **the Insane**.",
+      "source_name": "Original guide",
+      "locations": []
+    }
+  ]
+}

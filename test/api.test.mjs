@@ -62,7 +62,7 @@ test('invalid missing kind is a 400', async () => {
 test('guide returns text + map locations', async () => {
   const data = await (await fetch(`${BASE}/api/guide/mount/265`)).json();
   assert.ok(data.guide.body_md.length > 50);
-  assert.equal(data.locations.length, 3);
+  assert.equal(data.locations.length, 4); // the four wiki-verified TLPD spawn points
   for (const l of data.locations) {
     assert.ok(l.coord_x >= 0 && l.coord_x <= 100);
     assert.ok(l.coord_y >= 0 && l.coord_y <= 100);

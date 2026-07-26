@@ -179,6 +179,10 @@ function openGuide(name, { guide, locations }) {
   $('#guide-title').textContent = name;
   $('#guide-body').innerHTML = guide ? miniMarkdown(guide.body_md) : '<p>No guide text yet.</p>';
   $('#guide-map').innerHTML = locations?.length ? mapFigure(locations) : '';
+  // If the optional zone tile 404s, remove it so the coordinate grid shows
+  // (a missing SVG <image> otherwise renders as a giant broken-image glyph).
+  $('#guide-map').querySelector('svg image')
+    ?.addEventListener('error', (e) => e.target.remove());
   $('#guide-attrib').textContent = guide?.source_name
     ? `Guide: ${guide.source_name}${guide.source_url ? ` — ${guide.source_url}` : ''}`
     : '';

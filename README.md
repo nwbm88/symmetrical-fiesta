@@ -66,6 +66,18 @@ from CSV (columns in `data/examples/locations.example.csv`; collectibles by id o
 exact name). Drop zone images at `public/maps/<map_id>.jpg` and the guide maps use
 them as backgrounds automatically — pins and coordinates work either way.
 
+## Guide dataset
+
+`data/guides.seed.json` ships **41 guides with 36 map pins** — the classic farm
+mounts (raid/dungeon drops, rare-spawn camps, world drops), toys, and the big
+achievement metas — checked against retail **12.0.7** (all legacy/evergreen
+content, unaffected by Midnight). Rare-spawn coordinates (Time-Lost Proto-Drake's
+four spawn points, Aeonaxx's six) come from Warcraft Wiki (CC BY-SA 4.0, attributed
+per entry); entrance pins are approximate and marked as such. The file is the
+single source of truth: demo mode serves it directly and `npm run db:seed` loads
+it into Postgres, matching entries by Blizzard id or collection-journal name.
+Add your own entries to the same file — `npm test` validates its shape.
+
 **Classic** — set `GAME_VERSION=classic` (or `classic1x`) in `.env`; use a separate
 database per game version.
 
