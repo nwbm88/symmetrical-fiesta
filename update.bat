@@ -15,7 +15,18 @@ if not exist ".venv\Scripts\python.exe" (
 
 echo Updating yt-dlp...
 ".venv\Scripts\python.exe" -m pip install --upgrade yt-dlp
+if errorlevel 1 goto :failed
 echo.
-echo Done.
+echo Done - yt-dlp is up to date.
 pause
-endlocal
+exit /b 0
+
+:failed
+echo.
+echo   The update failed - see the messages above.
+echo   Usually that means no internet connection, or a proxy/firewall
+echo   blocking it. If it persists, delete the .venv folder and run
+echo   run.bat again to rebuild it from scratch.
+echo.
+pause
+exit /b 1

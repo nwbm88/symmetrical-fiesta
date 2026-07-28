@@ -61,6 +61,29 @@ def _safe(name: str, maxlen: int = 120) -> str:
     return safe_filename(name, maxlen)
 
 
+def _rename_to_match(dest: Path, rec: dict) -> Path:
+    """Move a show folder to the name its final metadata deserves.
+
+    Returns the folder actually in use — the original one if the rename is
+    unnecessary, would collide, or the filesystem refuses (a file inside may
+    still be locked on Windows).
+    """
+    wanted = show_dir_name(rec)
+    if wanted == dest.name:
+        return dest
+    target = dest.parent / wanted
+    if target.exists():
+        return dest
+    try:
+        dest.rename(target)
+        log.info("renamed show folder to %s", wanted)
+        return target
+    except OSError as e:
+        log.warning("could not rename show folder to %r (%s) — keeping %r",
+                    wanted, e, dest.name)
+        return dest
+
+
 def show_dir_name(rec: dict) -> str:
     date = rec["show"].get("date") or "unknown-date"
     venue = rec["show"].get("venue") or rec["title"][:60]
@@ -92,13 +115,22 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
     else:
         raise ValueError(f"unknown source {rec['source']}")
 
-    # Refine the show guess with full metadata now that we have it.
+    # Refine the show guess with full metadata now that we have it.  Check
+    # the catalogue title as well as the fetched one: an extractor can return
+    # something less informative than the search result (the generic
+    # extractor, for instance, uses the filename), and throwing that away
+    # loses the date and venue we already had.
     from .showinfo import extract_show_info
-    full = extract_show_info(info.get("title") or rec["title"],
-                             info.get("description") or "")
     show = dict(rec["show"])
-    show["date"] = show.get("date") or full.date
-    show["venue"] = show.get("venue") or full.venue
+    for title, desc in ((info.get("title"), info.get("description")),
+                        (rec.get("title"), "")):
+        if show.get("date") and show.get("venue"):
+            break
+        if not title:
+            continue
+        found = extract_show_info(title, desc or "")
+        show["date"] = show.get("date") or found.date
+        show["venue"] = show.get("venue") or found.venue
 
     # Still missing something?  Mine the comments/reviews — fans often post
     # the date, venue, or a full timestamped setlist there.
@@ -109,6 +141,10 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
         found = extract_show_info(c)
         show["date"] = show["date"] or found.date
         show["venue"] = show["venue"] or found.venue
+
+    # The folder was named before we knew the date and venue — now that we
+    # do, put it where it belongs, so the archive stays organised by show.
+    dest = _rename_to_match(dest, {**rec, "show": show})
 
     manifest = {
         "artist": artist,

@@ -67,7 +67,9 @@ exit /b 1
 
 REM ------------------------------------------------------- ffmpeg notice
 :check_ffmpeg
-where ffmpeg >nul 2>&1
+REM Ask ffmpeg itself rather than using WHERE, which isn't present on every
+REM system (and the app re-checks properly at startup either way).
+ffmpeg -version >nul 2>&1
 if not errorlevel 1 goto :launch
 if exist "ffmpeg\bin\ffmpeg.exe" goto :launch
 echo NOTE: ffmpeg was not found. Downloading works without it, but
