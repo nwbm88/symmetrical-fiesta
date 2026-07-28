@@ -25,7 +25,8 @@ import queue
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl, QSize
+from PySide6.QtCore import (Qt, QThread, Signal, QSettings, QUrl,
+                            QSize, QTimer)
 from PySide6.QtGui import QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
@@ -42,7 +43,9 @@ from .jobs import (Job, JobQueue, QUALITY_CHOICES, QUALITY_SHORT,
                    QUEUED, RUNNING, DONE, FAILED, CANCELLED)
 from .pipeline import scan_collection
 from .platformsupport import (check_ffmpeg, check_js_runtime,
-                              find_js_runtime, COOKIE_BROWSERS)
+                              find_js_runtime, COOKIE_BROWSERS,
+                              cloud_warning, cloud_service_for,
+                              long_paths_enabled, IS_WINDOWS)
 from .thumbnails import ThumbnailCache, THUMB_W, THUMB_H
 from .showinfo import extract_date
 from .tracks import tracks_from_description
@@ -248,6 +251,35 @@ class MainWindow(QMainWindow):
         self.refresh_artists()
         self.refresh_queue()
         self._warn_if_no_ffmpeg()
+        QTimer.singleShot(0, self._warn_if_cloud_folder)
+
+    def _warn_if_cloud_folder(self):
+        """A synced folder will try to upload every gigabyte we download."""
+        if self.settings.value("cloud_warning_shown", "") == str(self.collection_dir):
+            return
+        warning = cloud_warning(self.collection_dir)
+        if not warning:
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Collection folder is inside "
+                           + (cloud_service_for(self.collection_dir) or "a synced folder"))
+        box.setText(warning)
+        choose = box.addButton("Choose another folder ...",
+                               QMessageBox.AcceptRole)
+        box.addButton("Keep it here", QMessageBox.RejectRole)
+        box.exec()
+        self.settings.setValue("cloud_warning_shown", str(self.collection_dir))
+        if box.clickedButton() is choose:
+            d = QFileDialog.getExistingDirectory(
+                self, "Where should the collection live?",
+                str(Path.home()))
+            if d:
+                self.settings.setValue("collection_dir", d)
+                if hasattr(self, "s_dir"):
+                    self.s_dir.setText(d)
+                self.statusBar().showMessage(f"Collection folder set to {d}")
+                self.refresh_collection()
 
     def _warn_if_no_ffmpeg(self):
         problem = check_ffmpeg()
@@ -1112,6 +1144,12 @@ class MainWindow(QMainWindow):
         row.addWidget(b)
         form.addRow("Collection folder", row)
 
+        self.s_dir_note = QLabel()
+        self.s_dir_note.setWordWrap(True)
+        self._update_dir_note()
+        self.s_dir.textChanged.connect(lambda _: self._update_dir_note())
+        form.addRow("", self.s_dir_note)
+
         self.s_key = QLineEdit(self.setlist_key)
         self.s_key.setPlaceholderText("optional — used to auto-name tracks when "
                                       "a video has no chapters/timestamps")
@@ -1159,11 +1197,31 @@ class MainWindow(QMainWindow):
         if js_problem:
             js.setStyleSheet("color:#b8860b;")
         form.addRow("JavaScript runtime", js)
+
+        if IS_WINDOWS and not long_paths_enabled():
+            lp = QLabel(
+                "Windows still limits paths to 260 characters. Folder and "
+                "track names are shortened automatically to fit, so nothing "
+                "breaks — but a shorter collection path leaves more room for "
+                "readable names.")
+            lp.setWordWrap(True)
+            lp.setStyleSheet("color:#888;")
+            form.addRow("Path length", lp)
         form.addRow("", QLabel(
             "Keep yt-dlp up to date — YouTube changes regularly and downloads "
             "start failing when it goes stale.\n"
             "Windows: run update.bat.   Otherwise: pip install -U yt-dlp"))
         return w
+
+    def _update_dir_note(self):
+        warning = cloud_warning(self.s_dir.text().strip() or ".")
+        if warning:
+            self.s_dir_note.setText("⚠ " + warning.replace("\n\n", "  "))
+            self.s_dir_note.setStyleSheet("color:#b8860b;")
+        else:
+            self.s_dir_note.setText(
+                "Downloads are large — keep this on a drive with room to spare.")
+            self.s_dir_note.setStyleSheet("color:#888;")
 
     def _pick_dir(self):
         d = QFileDialog.getExistingDirectory(self, "Collection folder",

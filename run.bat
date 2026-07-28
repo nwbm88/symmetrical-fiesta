@@ -8,7 +8,24 @@ setlocal
 chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
+REM ---------------------------------------------------------------------
+REM  Where to build the Python environment.
+REM  A cloud-synced folder (OneDrive, Dropbox, ...) is a bad home for it:
+REM  a virtualenv is thousands of small files, syncing them wastes the
+REM  quota and the sync client can lock or replace files mid-use, which
+REM  breaks the environment.  So when we are inside one, build it under
+REM  %LOCALAPPDATA% instead, which never syncs.
+REM ---------------------------------------------------------------------
+REM  Tested with string substitution rather than FIND, which is an external
+REM  command and not always present.
 set "VENV=.venv"
+if not "%CD%"=="%CD:OneDrive=%"     set "VENV=%LOCALAPPDATA%\livearchiver\venv"
+if not "%CD%"=="%CD:OneDrive=%"     set "SYNCED=OneDrive"
+if not "%CD%"=="%CD:Dropbox=%"      set "VENV=%LOCALAPPDATA%\livearchiver\venv"
+if not "%CD%"=="%CD:Dropbox=%"      set "SYNCED=Dropbox"
+if not "%CD%"=="%CD:Google Drive=%" set "VENV=%LOCALAPPDATA%\livearchiver\venv"
+if not "%CD%"=="%CD:Google Drive=%" set "SYNCED=Google Drive"
+
 set "PYEXE=%VENV%\Scripts\python.exe"
 set "PYWEXE=%VENV%\Scripts\pythonw.exe"
 
@@ -16,6 +33,11 @@ if exist "%PYEXE%" goto :check_ffmpeg
 
 REM ---------------------------------------------------- first-run setup
 echo First run: setting up the Python environment. This takes a minute...
+if defined SYNCED echo   NOTE: this folder is inside %SYNCED%, so the Python
+if defined SYNCED echo         environment goes in %%LOCALAPPDATA%% instead - a
+if defined SYNCED echo         virtualenv is thousands of small files and does
+if defined SYNCED echo         not belong in cloud sync.
+echo   location: %VENV%
 echo.
 
 set "BOOTSTRAP="
@@ -81,6 +103,10 @@ echo.
 
 REM -------------------------------------------------------------- launch
 :launch
+if defined SYNCED echo NOTE: you are running from a %SYNCED% folder. Keep the
+if defined SYNCED echo       *collection* outside it - concert downloads are
+if defined SYNCED echo       gigabytes each. Set it on the Settings tab.
+if defined SYNCED echo.
 REM Fail early with a readable message if the app can't even be imported.
 "%PYEXE%" -c "import livearchiver" 2>nul
 if errorlevel 1 goto :import_failed

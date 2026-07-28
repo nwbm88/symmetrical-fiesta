@@ -25,7 +25,8 @@ from typing import Optional
 import requests
 
 from .platformsupport import (safe_filename, is_bot_check,
-                              BOT_CHECK_HELP, js_runtime_options)
+                              BOT_CHECK_HELP, js_runtime_options,
+                              name_budget)
 from .integrity import (record_checksums, free_space, human_bytes)
 
 log = logging.getLogger("livearchiver")
@@ -97,14 +98,14 @@ def _safe(name: str, maxlen: int = 120) -> str:
     return safe_filename(name, maxlen)
 
 
-def _rename_to_match(dest: Path, rec: dict) -> Path:
+def _rename_to_match(dest: Path, rec: dict, budget: int = 70) -> Path:
     """Move a show folder to the name its final metadata deserves.
 
     Returns the folder actually in use — the original one if the rename is
     unnecessary, would collide, or the filesystem refuses (a file inside may
     still be locked on Windows).
     """
-    wanted = show_dir_name(rec)
+    wanted = show_dir_name(rec, budget)
     if wanted == dest.name:
         return dest
     target = dest.parent / wanted
@@ -147,11 +148,14 @@ def _trim_words(text: str, limit: int) -> str:
     return cut.strip(" ,-")
 
 
-def show_dir_name(rec: dict) -> str:
+def show_dir_name(rec: dict, budget: int = 70) -> str:
     show = rec.get("show") or {}
     date = show.get("date") or "unknown-date"
-    venue = show.get("venue") or _trim_words(rec.get("title") or "untitled show", 60)
-    return _safe(f"{date} - {_trim_words(venue, 70)}")
+    # the date is the useful part — never let the venue crowd it out
+    venue_budget = max(budget - len(date) - 3, 12)
+    venue = show.get("venue") or _trim_words(rec.get("title") or "untitled show",
+                                             venue_budget)
+    return _safe(f"{date} - {_trim_words(venue, venue_budget)}")
 
 
 def download(rec: dict, collection: Path, audio_only: bool = False,
@@ -175,7 +179,10 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
         quality = "audio" if audio_only else "best"
     audio_only = quality == "audio"
     artist = rec.get("artist") or "Unknown Artist"
-    dest = collection / _safe(artist) / show_dir_name(rec)
+    # Keep the deepest file we will create inside the platform's path limit;
+    # on Windows that is 260 characters unless long paths are switched on.
+    budget = name_budget(collection)
+    dest = collection / _safe(artist, budget) / show_dir_name(rec, budget)
     dest.mkdir(parents=True, exist_ok=True)
 
     if rec["source"] == "youtube":
@@ -218,7 +225,7 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
 
     # The folder was named before we knew the date and venue — now that we
     # do, put it where it belongs, so the archive stays organised by show.
-    dest = _rename_to_match(dest, {**rec, "show": show})
+    dest = _rename_to_match(dest, {**rec, "show": show}, budget)
 
     manifest = {
         "artist": artist,

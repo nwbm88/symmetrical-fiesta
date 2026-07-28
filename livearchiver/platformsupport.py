@@ -261,3 +261,83 @@ def shorten_path_component(name: str, budget: int) -> str:
     if budget < 20:
         budget = 20
     return name[:budget].strip(" .") or "untitled"
+
+
+# ------------------------------------------------------- Windows path length
+
+# Unless long paths are enabled, Windows refuses anything over 260 characters.
+# The archive nests collection/<artist>/<date - venue>/audio/<NN - title>.flac,
+# so a deep collection folder plus a wordy venue and song title can cross it —
+# and the failure looks like a random "cannot create file".
+MAX_PATH = 260
+PATH_SAFETY_MARGIN = 15
+
+
+def long_paths_enabled() -> bool:
+    """True when Windows has had the 260-character limit lifted."""
+    if not IS_WINDOWS:
+        return True
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                             r"SYSTEM\CurrentControlSet\Control\FileSystem")
+        value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+        return bool(value)
+    except Exception:
+        return False
+
+
+def name_budget(collection_root, reserve: int = 0) -> int:
+    """How many characters a single name may use inside the collection.
+
+    Budgets for the deepest thing we create:
+        <root>/<artist>/<date - venue>/audio/<NN - title>.flac
+    Three names share what is left, so each gets a third.
+    """
+    if not IS_WINDOWS or long_paths_enabled():
+        return 120                      # generous; only the OS cares beyond this
+    fixed = len(str(Path(collection_root).resolve())) + len("/audio/") + \
+        len(".flac") + reserve + PATH_SAFETY_MARGIN
+    available = MAX_PATH - fixed
+    return max(available // 3, 24)      # never so short as to be useless
+
+
+# ------------------------------------------------------ cloud-synced folders
+
+CLOUD_MARKERS = ("onedrive", "dropbox", "google drive", "googledrive",
+                 "icloud", "box sync", "pcloud", "mega", "nextcloud",
+                 "sync.com", "creative cloud files")
+
+
+def cloud_service_for(path) -> Optional[str]:
+    """Name of the sync service that appears to own *path*, if any."""
+    text = str(Path(path).resolve()).replace("\\", "/").lower()
+    for marker in CLOUD_MARKERS:
+        if f"/{marker}" in text or text.startswith(marker):
+            pretty = {"onedrive": "OneDrive", "dropbox": "Dropbox",
+                      "google drive": "Google Drive",
+                      "googledrive": "Google Drive",
+                      "icloud": "iCloud Drive"}.get(marker, marker.title())
+            return pretty
+    return None
+
+
+def cloud_warning(path) -> Optional[str]:
+    """Explain why keeping a concert archive inside a synced folder hurts."""
+    service = cloud_service_for(path)
+    if not service:
+        return None
+    return (
+        f"This folder is inside {service}, which will try to upload your whole "
+        f"archive.\n\n"
+        f"Concert downloads run to several gigabytes each, so this normally "
+        f"means a full {service} storage quota, a saturated upload connection, "
+        f"and files turned into online-only placeholders that ffmpeg then "
+        f"cannot read.\n\n"
+        f"Recommended: keep the app here if you like, but put the collection "
+        f"itself somewhere outside {service} — for example "
+        f"C:\\\\Users\\\\Owner\\\\Music\\\\LiveArchive — using the collection "
+        f"folder setting on the Settings tab.\n\n"
+        f"If you would rather keep it here, right-click the collection folder "
+        f"in Explorer and choose \"Always keep on this device\" so files are "
+        f"never turned into placeholders.")

@@ -13,7 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from .platformsupport import ffmpeg, ffprobe, popen_kwargs, safe_filename
+from .platformsupport import (ffmpeg, ffprobe, popen_kwargs,
+                              safe_filename, name_budget)
 
 log = logging.getLogger("livearchiver")
 
@@ -132,8 +133,8 @@ def fit_names_to_silences(names: list[str], cuts: list[float],
             for i in range(len(names))]
 
 
-def _safe(name: str) -> str:
-    return safe_filename(name, 100)
+def _safe(name: str, budget: int = 100) -> str:
+    return safe_filename(name, budget)
 
 
 MIN_TRACK_LEN = 0.5
@@ -214,6 +215,8 @@ def cut_tracks(master: Path, tracks: list[dict], show: dict,
     album = album or " - ".join(x for x in (show.get("date"), show.get("venue")) if x) \
         or "Live"
     out_dir = master.parent
+    # "NN - " prefix and ".flac" are already accounted for by name_budget
+    track_budget = name_budget(out_dir, reserve=len(str(out_dir)))
     tracks, warnings = sanitize_tracks(tracks, total)
     for w in warnings:
         log.warning("tracklist: %s", w)
@@ -231,7 +234,7 @@ def cut_tracks(master: Path, tracks: list[dict], show: dict,
         if progress:
             progress(i, len(tracks), t["title"])
         start, end = t["start"], t["end"]
-        out = out_dir / f"{i:02d} - {_safe(t['title'])}.flac"
+        out = out_dir / f"{i:02d} - {_safe(t['title'], track_budget)}.flac"
         cmd = [ffmpeg(), "-nostdin", "-y", "-i", str(master),
                "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
                "-acodec", "flac",

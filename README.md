@@ -45,6 +45,29 @@ yt-dlp           2026.07.04
 Downloads work without ffmpeg; extracting and splitting audio do not. The
 Settings tab tells you which state you are in.
 
+### If you put the app in OneDrive (or Dropbox / Google Drive)
+
+Running the app from a synced folder is fine — the **collection** is what
+matters. Concert downloads run to several gigabytes each, so leaving the
+collection inside OneDrive normally means a full storage quota, a saturated
+upload, and files turned into online-only placeholders that ffmpeg then can't
+read.
+
+The app handles this for you:
+
+- On first launch it notices, explains, and offers to put the collection
+  somewhere else. You can also set it any time on the Settings tab.
+- `run.bat` builds its Python environment under `%LOCALAPPDATA%` instead of
+  the synced folder — a virtualenv is thousands of small files that has no
+  business in cloud sync, and sync clients can lock or replace them mid-use.
+- Folder and track names are shortened automatically so the deepest file
+  stays inside Windows' 260-character path limit, which a deep synced path
+  eats into. The show date is always preserved when trimming.
+
+If you'd rather keep everything in the synced folder, right-click the
+collection folder in Explorer and choose **"Always keep on this device"** so
+files are never converted to placeholders.
+
 ### macOS / Linux
 
 ```
