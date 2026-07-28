@@ -41,7 +41,8 @@ from . import sources
 from .jobs import (Job, JobQueue, QUALITY_CHOICES, QUALITY_SHORT,
                    QUEUED, RUNNING, DONE, FAILED, CANCELLED)
 from .pipeline import scan_collection
-from .platformsupport import check_ffmpeg, COOKIE_BROWSERS
+from .platformsupport import (check_ffmpeg, check_js_runtime,
+                              find_js_runtime, COOKIE_BROWSERS)
 from .thumbnails import ThumbnailCache, THUMB_W, THUMB_H
 from .showinfo import extract_date
 from .tracks import tracks_from_description
@@ -250,13 +251,16 @@ class MainWindow(QMainWindow):
 
     def _warn_if_no_ffmpeg(self):
         problem = check_ffmpeg()
+        self._ffmpeg_problem = problem
+        notes = []
         if problem:
-            self.statusBar().showMessage(
-                "ffmpeg not found — downloading works, but audio extraction "
-                "and splitting will not. See Settings.")
-            self._ffmpeg_problem = problem
-        else:
-            self._ffmpeg_problem = None
+            notes.append("ffmpeg not found — downloading works, but audio "
+                         "extraction and splitting will not")
+        if check_js_runtime():
+            notes.append("no JavaScript runtime — YouTube downloads may fail "
+                         "or miss formats")
+        if notes:
+            self.statusBar().showMessage(" · ".join(notes) + ". See Settings.")
 
     # -------------------------------------------------- settings properties
 
@@ -1145,6 +1149,16 @@ class MainWindow(QMainWindow):
         if problem:
             ff.setStyleSheet("color:#c0392b;")
         form.addRow("ffmpeg", ff)
+
+        js_problem = check_js_runtime()
+        js = QLabel(js_problem if js_problem
+                    else f"✓ JavaScript runtime found "
+                         f"({Path(find_js_runtime()).name}) — YouTube "
+                         f"extraction is fully supported.")
+        js.setWordWrap(True)
+        if js_problem:
+            js.setStyleSheet("color:#b8860b;")
+        form.addRow("JavaScript runtime", js)
         form.addRow("", QLabel(
             "Keep yt-dlp up to date — YouTube changes regularly and downloads "
             "start failing when it goes stale.\n"

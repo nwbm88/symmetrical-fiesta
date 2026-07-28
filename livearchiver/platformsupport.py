@@ -142,6 +142,85 @@ def safe_filename(name: str, maxlen: int = 120) -> str:
     return name or "untitled"
 
 
+# ------------------------------------------------------ JavaScript runtime
+
+# Recent yt-dlp runs YouTube's player JavaScript to work out media URLs.
+# Without a runtime it warns that formats may be missing, and treats the
+# JS-less path as deprecated — so downloads fail or come back lower quality
+# for reasons that are not obvious from the error.
+JS_RUNTIMES = ("deno", "node", "bun")
+
+
+def _extra_runtime_locations(name: str) -> list[Path]:
+    """Places an installer drops a runtime without putting it on PATH."""
+    home = Path.home()
+    exe = f"{name}.exe" if IS_WINDOWS else name
+    spots = [home / f".{name}" / "bin" / exe]
+    if IS_WINDOWS:
+        for base in filter(None, (os.environ.get("ProgramFiles"),
+                                  os.environ.get("LOCALAPPDATA"))):
+            spots += [Path(base) / name / exe,
+                      Path(base) / "Programs" / name / exe]
+    else:
+        spots += [Path("/usr/local/bin") / exe, Path("/opt/homebrew/bin") / exe]
+    return spots
+
+
+def find_js_runtimes() -> dict[str, str]:
+    """Every JavaScript runtime we can find, as {name: full path}."""
+    found: dict[str, str] = {}
+    for name in JS_RUNTIMES:
+        exe = f"{name}.exe" if IS_WINDOWS else name
+        path = shutil.which(exe) or shutil.which(name)
+        if not path:
+            path = next((str(p) for p in _extra_runtime_locations(name)
+                         if p.is_file()), None)
+        if path:
+            found[name] = path
+    return found
+
+
+def find_js_runtime() -> Optional[str]:
+    runtimes = find_js_runtimes()
+    for name in JS_RUNTIMES:                 # deno first — yt-dlp prefers it
+        if name in runtimes:
+            return runtimes[name]
+    return None
+
+
+def js_runtime_options() -> dict:
+    """The ``js_runtimes`` value to hand yt-dlp.
+
+    yt-dlp only enables Deno by default, so a machine with Node.js installed
+    still falls back to the degraded JS-less path and warns that formats may
+    be missing.  Passing this replaces that default, so we list everything
+    we found — with explicit paths, since an installer may not have put the
+    runtime on PATH at all.
+    """
+    return {name: {"path": path} for name, path in find_js_runtimes().items()}
+
+
+def js_runtime_message() -> str:
+    if IS_WINDOWS:
+        how = ("Install Deno with:\n"
+               "    winget install DenoLand.Deno\n"
+               "or download it from https://deno.com/ and add it to PATH. "
+               "Node.js works too.")
+    else:
+        how = ("Install Deno with:\n"
+               "    curl -fsSL https://deno.land/install.sh | sh\n"
+               "or use your package manager. Node.js works too.")
+    return ("No JavaScript runtime found. YouTube downloads still work in "
+            "many cases, but yt-dlp needs one to read YouTube's player "
+            "properly — without it some formats are unavailable and "
+            "downloads fail more often.\n\n" + how)
+
+
+def check_js_runtime() -> Optional[str]:
+    """None when a runtime is available, else an explanation."""
+    return None if find_js_runtime() else js_runtime_message()
+
+
 # --------------------------------------------------------- yt-dlp cookies
 
 # YouTube increasingly asks for proof you are not a bot.  Handing yt-dlp the

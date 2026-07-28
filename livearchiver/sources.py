@@ -60,12 +60,16 @@ def search_youtube(artist: str, queries: list[str], limit: int = 50) -> list[dic
     from yt_dlp import YoutubeDL
 
     results: dict[str, dict] = {}
+    from .platformsupport import js_runtime_options
     opts = {
         "quiet": True,
         "no_warnings": True,
         "extract_flat": "in_playlist",
         "skip_download": True,
     }
+    runtimes = js_runtime_options()
+    if runtimes:
+        opts["js_runtimes"] = runtimes
     with YoutubeDL(opts) as ydl:
         for q in queries:
             log.info("YouTube: searching %r ...", q)

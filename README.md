@@ -25,6 +25,23 @@ instead of flashing a console and vanishing.
 **`update.bat`** updates yt-dlp. Run it when YouTube downloads start
 failing — that is nearly always the cause.
 
+### A JavaScript runtime helps YouTube downloads
+
+Recent yt-dlp runs YouTube's own player JavaScript to work out media URLs.
+Without a runtime it warns that some formats are unavailable and downloads
+fail more often. Install **Deno** (`winget install DenoLand.Deno`, or from
+<https://deno.com/>) — Node.js and Bun work too. yt-dlp only enables Deno by
+itself, so livearchiver detects whichever you have and enables it explicitly.
+
+Run **`livearchiver doctor`** at any time to see what was found:
+
+```
+ffmpeg           C:\ffmpeg\bin\ffmpeg.exe
+ffprobe          C:\ffmpeg\bin\ffprobe.exe
+JS runtime       deno: C:\Users\you\.deno\bin\deno.exe
+yt-dlp           2026.07.04
+```
+
 Downloads work without ffmpeg; extracting and splitting audio do not. The
 Settings tab tells you which state you are in.
 

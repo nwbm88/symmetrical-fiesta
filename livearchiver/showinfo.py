@@ -113,6 +113,35 @@ _VENUE_PATTERNS = [
 ]
 
 
+# A venue is a name, not a sentence.  The "live at ..." pattern happily
+# matches prose in a description ("...live at one with harmony with nature,
+# our mother earth, and each other. And ..."), which then becomes the folder
+# name for the show — so check that what we caught looks like a place.
+MAX_VENUE_WORDS = 8
+MAX_VENUE_CHARS = 60
+
+
+def plausible_venue(venue: Optional[str]) -> bool:
+    if not venue:
+        return False
+    v = venue.strip()
+    if len(v) < 3 or len(v) > MAX_VENUE_CHARS:
+        return False
+    if len(v.split()) > MAX_VENUE_WORDS:
+        return False
+    if re.search(r"\.\s+\S", v):          # a sentence break mid-string
+        return False
+    if v.count(",") > 2:                    # more list than address
+        return False
+    # prose giveaways: these almost never appear in a venue name
+    if re.search(r"\b(and|with|our|that|this|which|because|please|thanks|"
+                 r"subscribe|http)\b", v, re.IGNORECASE):
+        return False
+    if not re.search(r"[A-Za-z]", v):
+        return False
+    return True
+
+
 def extract_venue(text: str) -> Optional[str]:
     for ev in KNOWN_EVENTS:
         if ev in text.lower():
@@ -127,7 +156,9 @@ def extract_venue(text: str) -> Optional[str]:
             # cut trailing date fragments ("... on June 14 2016")
             venue = re.split(r"\b(?:on\s+)?" + _MONTH_RE + r"|\b(?:19|20)\d{2}\b|\d{1,2}[./-]\d{1,2}",
                              venue, 1, flags=re.IGNORECASE)[0].strip(" .,-|")
-            if len(venue) >= 3:
+            # take only the first sentence — descriptions run on
+            venue = re.split(r"\.\s", venue)[0].strip(" .,-|")
+            if plausible_venue(venue):
                 return venue
     return None
 

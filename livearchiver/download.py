@@ -18,15 +18,24 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
 import requests
 
-from .platformsupport import safe_filename, is_bot_check, BOT_CHECK_HELP
+from .platformsupport import (safe_filename, is_bot_check,
+                              BOT_CHECK_HELP, js_runtime_options)
 from .integrity import (record_checksums, free_space, human_bytes)
 
 log = logging.getLogger("livearchiver")
+
+
+# archive.org serves from a mirror pool and a node can return a 5xx for a
+# single file; a live show is often one file per song, so one flaky file
+# must not throw away the whole download.
+IA_ATTEMPTS = 5
+IA_BACKOFF = 4          # seconds, multiplied by the attempt number
 
 
 class _Cancelled(Exception):
@@ -127,11 +136,22 @@ def _fetch_cover(rec: dict, dest: Path):
             continue
 
 
+def _trim_words(text: str, limit: int) -> str:
+    """Shorten to a word boundary — 'Reading Festi' helps nobody."""
+    text = " ".join((text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")]
+    return cut.strip(" ,-")
+
+
 def show_dir_name(rec: dict) -> str:
     show = rec.get("show") or {}
     date = show.get("date") or "unknown-date"
-    venue = show.get("venue") or (rec.get("title") or "untitled show")[:60]
-    return _safe(f"{date} - {venue}")
+    venue = show.get("venue") or _trim_words(rec.get("title") or "untitled show", 60)
+    return _safe(f"{date} - {_trim_words(venue, 70)}")
 
 
 def download(rec: dict, collection: Path, audio_only: bool = False,
@@ -162,8 +182,12 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
         info = _download_youtube(rec, dest, quality, progress, should_cancel,
                                  cookies_browser)
     else:
-        info = _download_archive_org(rec, dest, audio_only, progress,
-                                     should_cancel)
+        try:
+            info = _download_archive_org(rec, dest, audio_only, progress,
+                                         should_cancel)
+        except JobCancelledMarker:
+            from .jobs import JobCancelled
+            raise JobCancelled() from None
 
     # Refine the show guess with full metadata now that we have it.  Check
     # the catalogue title as well as the fetched one: an extractor can return
@@ -293,6 +317,9 @@ def _download_youtube(rec: dict, dest: Path, quality: str,
         "extractor_args": {"youtube": {"max_comments": ["150"],
                                        "comment_sort": ["top"]}},
     }
+    runtimes = js_runtime_options()
+    if runtimes:
+        opts["js_runtimes"] = runtimes
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
     resumed = partial_bytes(dest)
@@ -336,6 +363,60 @@ AUDIO_EXTS = (".flac", ".wav", ".shn", ".mp3", ".ogg", ".m4a")
 VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".mpg", ".mpeg", ".mov")
 
 
+class JobCancelledMarker(Exception):
+    """Wrapper so a cancellation is never mistaken for a network error."""
+
+
+def _fetch_ia_file(url, part, have, mode, headers, progress, total_bytes,
+                   done_bytes, name, should_cancel):
+    """One attempt at one archive.org file; raises on any network problem."""
+    with requests.get(url, stream=True, timeout=60, headers=headers) as r:
+        if have and r.status_code == 200:
+            # the server ignored our range request — start the file again
+            mode, have = "wb", 0
+        r.raise_for_status()
+        done_bytes += have
+        with open(part, mode) as fh:
+            for chunk in r.iter_content(1 << 20):
+                if should_cancel and should_cancel():
+                    fh.close()
+                    part.unlink(missing_ok=True)
+                    from .jobs import JobCancelled
+                    raise JobCancelledMarker() from JobCancelled()
+                fh.write(chunk)
+                done_bytes += len(chunk)
+                if progress and total_bytes:
+                    progress(min(done_bytes / total_bytes, 1.0),
+                             f"downloading {Path(name).name}")
+
+
+def _ia_download_urls(meta: dict, identifier: str, name: str) -> list[str]:
+    """Every way we know of to fetch one file, best first.
+
+    ``archive.org/download/...`` redirects to whichever mirror it feels like,
+    which is sometimes a node that is unwell for this item while the one the
+    metadata names as workable serves it happily.  Retrying the same URL then
+    fails identically, so offer the alternatives explicitly.
+    """
+    urls = []
+    directory = (meta.get("dir") or "").strip("/")
+    servers = []
+    for key in ("workable_servers", "server", "d1", "d2"):
+        value = meta.get(key)
+        if isinstance(value, list):
+            servers.extend(v for v in value if v)
+        elif value:
+            servers.append(value)
+    seen = set()
+    for host in servers:
+        if host in seen or not directory:
+            continue
+        seen.add(host)
+        urls.append(f"https://{host}/{directory}/{name}")
+    urls.append(f"https://archive.org/download/{identifier}/{name}")
+    return urls
+
+
 def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
                           progress=None, should_cancel=None) -> dict:
     identifier = rec["id"].split(":", 1)[1]
@@ -351,7 +432,7 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
     done_bytes = 0
     saved = []
     for f in chosen:
-        url = f"https://archive.org/download/{identifier}/{f['name']}"
+        urls = _ia_download_urls(meta, identifier, f["name"])
         out = dest / _safe(Path(f["name"]).name)
         expected = int(f.get("size", -1))
         if out.exists() and out.stat().st_size == expected:
@@ -376,27 +457,57 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
             have = 0
 
         log.info("downloading %s (%.1f MB)", f["name"], max(expected, 0) / 1e6)
-        with requests.get(url, stream=True, timeout=60, headers=headers) as r:
-            if have and r.status_code == 200:
-                # server ignored the range request — start clean
-                have, mode = 0, "wb"
-            elif have and r.status_code != 206:
-                r.raise_for_status()
-            else:
-                r.raise_for_status()
-            done_bytes += have
-            with open(part, mode) as fh:
-                for chunk in r.iter_content(1 << 20):
-                    if should_cancel and should_cancel():
-                        fh.close()
-                        part.unlink(missing_ok=True)
-                        from .jobs import JobCancelled
-                        raise JobCancelled()
-                    fh.write(chunk)
-                    done_bytes += len(chunk)
-                    if progress and total_bytes:
-                        progress(min(done_bytes / total_bytes, 1.0),
-                                 f"downloading {Path(f['name']).name}")
+        base_done = done_bytes
+        last_error = None
+        for attempt in range(1, IA_ATTEMPTS + 1):
+            # rotate mirrors: a node that just failed will likely fail again
+            url = urls[(attempt - 1) % len(urls)]
+            try:
+                done_bytes = base_done
+                _fetch_ia_file(url, part, have, mode, headers, progress,
+                               total_bytes, done_bytes, f["name"],
+                               should_cancel)
+                last_error = None       # a later attempt succeeded
+                break
+            except JobCancelledMarker:
+                raise
+            except (requests.RequestException, OSError) as e:
+                last_error = e
+                if attempt == IA_ATTEMPTS:
+                    break
+                delay = IA_BACKOFF * attempt
+                next_url = urls[attempt % len(urls)]
+                log.warning("%s failed (%s) — retrying in %ds via %s "
+                            "(attempt %d of %d)", f["name"], e, delay,
+                            next_url.split("/")[2], attempt + 1, IA_ATTEMPTS)
+                if progress:
+                    progress(None, f"{Path(f['name']).name} failed, retrying "
+                                   f"in {delay}s ...")
+                time.sleep(delay)
+                # pick up wherever the failed attempt got to
+                have = part.stat().st_size if part.exists() else 0
+                if have and expected > 0 and have < expected:
+                    headers, mode = {"Range": f"bytes={have}-"}, "ab"
+                else:
+                    have, headers, mode = 0, {}, "wb"
+        else:                       # pragma: no cover - loop always breaks
+            last_error = last_error or RuntimeError("download failed")
+
+        if last_error is not None and not part.exists():
+            raise RuntimeError(
+                f"could not download {f['name']} from archive.org after "
+                f"{IA_ATTEMPTS} attempts ({last_error}).\n\n"
+                f"{len(saved)} of {len(chosen)} file(s) downloaded so far are "
+                f"kept — run the download again and it will carry on from "
+                f"there.") from last_error
+        if last_error is not None:
+            raise RuntimeError(
+                f"{f['name']} did not finish downloading ({last_error}). "
+                f"Progress is saved — run the download again to resume."
+            ) from last_error
+
+        done_bytes = base_done + (expected if expected > 0
+                                  else part.stat().st_size)
         part.replace(out)
         saved.append(out.name)
 

@@ -154,6 +154,44 @@ def cmd_verify(args) -> int:
     return 1 if bad else 0
 
 
+def cmd_doctor(args) -> int:
+    """Report whether everything the app depends on is actually present."""
+    from .platformsupport import (check_ffmpeg, check_js_runtime, ffmpeg,
+                                  ffprobe, ffplay, find_js_runtimes)
+    ok = True
+    ff = check_ffmpeg()
+    if ff:
+        ok = False
+        print("ffmpeg           MISSING\n  " + ff.replace("\n", "\n  "))
+    else:
+        print(f"ffmpeg           {ffmpeg()}")
+        print(f"ffprobe          {ffprobe()}")
+        play = ffplay() or "not found (audio preview falls back to Qt)"
+        print(f"ffplay           {play}")
+    js = check_js_runtime()
+    if js:
+        print("JS runtime       MISSING\n  " + js.replace("\n", "\n  "))
+    else:
+        found = find_js_runtimes()
+        for i, (name, path) in enumerate(found.items()):
+            label = "JS runtime" if i == 0 else ""
+            print(f"{label:<17}{name}: {path}")
+        print(f"{'':<17}(all of the above are enabled for yt-dlp; it would "
+              f"otherwise use Deno only)")
+    try:
+        import yt_dlp
+        print(f"yt-dlp           {yt_dlp.version.__version__}")
+    except Exception as e:
+        ok = False
+        print(f"yt-dlp           MISSING ({e})")
+    try:
+        import PySide6
+        print(f"PySide6          {PySide6.__version__}")
+    except Exception as e:
+        print(f"PySide6          MISSING ({e}) — the desktop app needs it")
+    return 0 if ok else 1
+
+
 def cmd_gui(args) -> int:
     try:
         from .gui import run
@@ -246,6 +284,11 @@ def main(argv=None) -> int:
                    help="record checksums for shows downloaded before this "
                         "feature existed")
     p.set_defaults(fn=cmd_verify)
+
+    p = sub.add_parser("doctor", parents=[common],
+                       help="check that ffmpeg, yt-dlp and a JS runtime are "
+                            "installed and findable")
+    p.set_defaults(fn=cmd_doctor)
 
     p = sub.add_parser("gui", parents=[common],
                        help="launch the desktop app (needs PySide6)")

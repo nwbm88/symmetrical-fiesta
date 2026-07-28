@@ -80,6 +80,10 @@ class StreamUrlResolver(QThread):
             opts = {"quiet": True, "no_warnings": True, "skip_download": True,
                     "format": "best[height<=720][acodec!=none][vcodec!=none]"
                               "/best[acodec!=none][vcodec!=none]/best"}
+            from .platformsupport import js_runtime_options
+            runtimes = js_runtime_options()
+            if runtimes:
+                opts["js_runtimes"] = runtimes
             if self.cookies_browser:
                 opts["cookiesfrombrowser"] = (self.cookies_browser,)
             with YoutubeDL(opts) as ydl:
