@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from .platformsupport import ffmpeg, ffprobe, popen_kwargs, safe_filename
+
 log = logging.getLogger("livearchiver")
 
 MEDIA_EXTS = (".mkv", ".mp4", ".webm", ".avi", ".mov", ".mpg",
@@ -21,7 +23,8 @@ MEDIA_EXTS = (".mkv", ".mp4", ".webm", ".avi", ".mov", ".mpg",
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     log.debug("$ %s", " ".join(cmd))
-    return subprocess.run(cmd, capture_output=True, text=True)
+    return subprocess.run(cmd, capture_output=True, text=True,
+                          **popen_kwargs())
 
 
 def find_source_media(show_dir: Path) -> list[Path]:
@@ -46,13 +49,13 @@ def extract_master(show_dir: Path) -> Path:
         raise RuntimeError(f"no media files found in {show_dir}")
 
     if len(sources) == 1:
-        cmd = ["ffmpeg", "-nostdin", "-i", str(sources[0]),
+        cmd = [ffmpeg(), "-nostdin", "-i", str(sources[0]),
                "-vn", "-acodec", "flac", str(master)]
     else:
         concat = audio_dir / "concat.txt"
         concat.write_text("".join(
             f"file '{p.resolve().as_posix()}'\n" for p in sources))
-        cmd = ["ffmpeg", "-nostdin", "-f", "concat", "-safe", "0",
+        cmd = [ffmpeg(), "-nostdin", "-f", "concat", "-safe", "0",
                "-i", str(concat), "-vn", "-acodec", "flac", str(master)]
 
     log.info("extracting audio master (%d source file(s)) ...", len(sources))
@@ -63,7 +66,7 @@ def extract_master(show_dir: Path) -> Path:
 
 
 def duration_of(media: Path) -> float:
-    p = _run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+    p = _run([ffprobe(), "-v", "error", "-show_entries", "format=duration",
               "-of", "default=noprint_wrappers=1:nokey=1", str(media)])
     return float(p.stdout.strip())
 
@@ -73,7 +76,7 @@ _SIL_END = re.compile(r"silence_end:\s*([\d.]+)\s*\|\s*silence_duration:\s*([\d.
 
 def detect_silences(media: Path, noise_db: int = -35, min_len: float = 1.5) -> list[float]:
     """Return candidate cut points (middle of each detected silence)."""
-    p = _run(["ffmpeg", "-nostdin", "-i", str(media), "-af",
+    p = _run([ffmpeg(), "-nostdin", "-i", str(media), "-af",
               f"silencedetect=noise={noise_db}dB:d={min_len}", "-f", "null", "-"])
     cuts = []
     for m in _SIL_END.finditer(p.stderr):
@@ -108,7 +111,7 @@ def fit_names_to_silences(names: list[str], cuts: list[float],
 
 
 def _safe(name: str) -> str:
-    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")[:100]
+    return safe_filename(name, 100)
 
 
 MIN_TRACK_LEN = 0.5
@@ -168,7 +171,7 @@ def cut_tracks(master: Path, tracks: list[dict], show: dict,
             progress(i, len(tracks), t["title"])
         start, end = t["start"], t["end"]
         out = out_dir / f"{i:02d} - {_safe(t['title'])}.flac"
-        cmd = ["ffmpeg", "-nostdin", "-y", "-i", str(master),
+        cmd = [ffmpeg(), "-nostdin", "-y", "-i", str(master),
                "-ss", f"{start:.3f}", "-to", f"{end:.3f}",
                "-acodec", "flac",
                "-metadata", f"title={t['title']}",

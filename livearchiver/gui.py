@@ -1,15 +1,21 @@
-"""Native desktop app (Qt / PySide6).  Launch with `livearchiver gui`.
+"""Native desktop app (Qt / PySide6).  Launch with `livearchiver gui`,
+`run.bat` on Windows or `run.sh` elsewhere.
 
-Two tabs:
+Four tabs:
 
 * **Get Music** — search YouTube + archive.org, browse the catalog grouped
-  by show (duplicates side by side, best version suggested), and queue
-  downloads.  The queue is strictly sequential: one download at a time.
+  by show (duplicates side by side, best version suggested), preview a
+  version before committing to it, and queue downloads.  The queue runs one
+  job at a time and behaves like a download manager: pause, cancel, retry,
+  reorder, per-item quality, clear finished.
 * **Collection** — everything you have: shows, provenance (date/place/source),
-  the original description, the split tracks, and buttons to extract & split.
+  the original description, the split tracks, the timeline editor.
+* **Artists** — every band in the catalog with its progress, so you can see
+  what is finished and remove bands you no longer want.
+* **Settings** — collection folder, setlist.fm key, default quality.
 
-Splits share the same job queue as downloads, so only one heavy task ever
-runs at once.
+Splits share the job queue with downloads, so only one heavy task runs at
+once.
 """
 
 from __future__ import annotations
@@ -17,7 +23,6 @@ from __future__ import annotations
 import json
 import queue
 import sys
-import uuid
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl
@@ -27,17 +32,22 @@ from PySide6.QtWidgets import (
     QPushButton, QCheckBox, QLineEdit, QTreeWidget, QTreeWidgetItem, QSplitter,
     QListWidget, QListWidgetItem, QProgressBar, QLabel, QPlainTextEdit,
     QFileDialog, QDialog, QFormLayout, QDialogButtonBox, QMessageBox,
+    QComboBox, QMenu, QHeaderView,
 )
 
 from . import DEFAULT_ARTIST
 from . import catalog as cat_mod
 from . import sources
-from .download import download
-from .pipeline import split_show, scan_collection
+from .jobs import (Job, JobQueue, QUALITY_CHOICES, QUALITY_SHORT,
+                   QUEUED, RUNNING, DONE, FAILED, CANCELLED)
+from .pipeline import scan_collection
+from .platformsupport import check_ffmpeg, COOKIE_BROWSERS
 from .showinfo import extract_date
 from .tracks import tracks_from_description
 
 REC_ROLE = Qt.UserRole + 1
+JOB_ROLE = Qt.UserRole + 2
+ARTIST_ROLE = Qt.UserRole + 3
 
 
 # ------------------------------------------------------------------ workers
@@ -58,64 +68,6 @@ class SearchWorker(QThread):
             except Exception as e:
                 errors.append(f"{name}: {e}")
         self.done.emit(results, "; ".join(errors))
-
-
-class Job:
-    def __init__(self, kind: str, label: str, payload: dict):
-        self.id = uuid.uuid4().hex
-        self.kind, self.label, self.payload = kind, label, payload
-
-
-class JobWorker(QThread):
-    """Persistent worker that executes downloads and splits one at a time."""
-    job_started = Signal(str)
-    job_progress = Signal(str, float, str)   # id, fraction (-1 = busy), message
-    job_finished = Signal(str, bool, str, object)  # id, ok, message, result
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.jobs: "queue.Queue[Job | None]" = queue.Queue()
-
-    def submit(self, job: Job):
-        self.jobs.put(job)
-
-    def shutdown(self):
-        self.jobs.put(None)
-
-    def run(self):
-        while True:
-            job = self.jobs.get()
-            if job is None:
-                return
-            self.job_started.emit(job.id)
-
-            def prog(frac, msg, _id=job.id):
-                self.job_progress.emit(_id, -1.0 if frac is None else float(frac), msg)
-
-            try:
-                if job.kind == "download":
-                    dest = download(job.payload["rec"],
-                                    Path(job.payload["collection"]),
-                                    audio_only=job.payload["audio_only"],
-                                    progress=prog)
-                    self.job_finished.emit(job.id, True, f"saved to {dest}",
-                                           {"dest": str(dest)})
-                elif job.kind == "split":
-                    res = split_show(Path(job.payload["show_dir"]),
-                                     setlist_key=job.payload.get("setlist_key") or None,
-                                     redetect=job.payload.get("redetect", False),
-                                     progress=prog)
-                    msg = f"{len(res['files'])} tracks via {res['strategy']}"
-                    if res.get("warnings"):
-                        msg += f" ({len(res['warnings'])} tracklist warning(s))"
-                    self.job_finished.emit(job.id, True, msg, res)
-                elif job.kind == "extract":
-                    res = split_show(Path(job.payload["show_dir"]),
-                                     cut=False, progress=prog)
-                    self.job_finished.emit(job.id, True,
-                                           "audio master extracted", res)
-            except Exception as e:
-                self.job_finished.emit(job.id, False, str(e), None)
 
 
 # ------------------------------------------------------------------ dialogs
@@ -266,24 +218,39 @@ class MainWindow(QMainWindow):
         self.cat = cat_mod.load(self.catalog_path)
         self.cat.setdefault("downloaded", {})
         self.cat.setdefault("ignored", {})
+        self.cat.setdefault("finished_artists", {})
 
-        self.worker = JobWorker(self)
-        self.worker.job_started.connect(self.on_job_started)
-        self.worker.job_progress.connect(self.on_job_progress)
-        self.worker.job_finished.connect(self.on_job_finished)
-        self.worker.start()
-        self.active_jobs: dict[str, tuple[Job, QListWidgetItem]] = {}
+        self.queue = JobQueue(self)
+        self.queue.job_progress.connect(self.on_job_progress)
+        self.queue.job_finished.connect(self.on_job_finished)
+        self.queue.changed.connect(self.refresh_queue)
+        self.queue.start()
+        self.worker = self.queue          # kept for existing call sites
         self.search_worker = None
 
         tabs = QTabWidget()
         tabs.addTab(self._build_acquire_tab(), "Get Music")
         tabs.addTab(self._build_collection_tab(), "Collection")
+        tabs.addTab(self._build_artists_tab(), "Artists")
         tabs.addTab(self._build_settings_tab(), "Settings")
         self.setCentralWidget(tabs)
         self.statusBar().showMessage("Ready")
 
         self.refresh_tree()
         self.refresh_collection()
+        self.refresh_artists()
+        self.refresh_queue()
+        self._warn_if_no_ffmpeg()
+
+    def _warn_if_no_ffmpeg(self):
+        problem = check_ffmpeg()
+        if problem:
+            self.statusBar().showMessage(
+                "ffmpeg not found — downloading works, but audio extraction "
+                "and splitting will not. See Settings.")
+            self._ffmpeg_problem = problem
+        else:
+            self._ffmpeg_problem = None
 
     # -------------------------------------------------- settings properties
 
@@ -297,7 +264,11 @@ class MainWindow(QMainWindow):
 
     @property
     def audio_only(self) -> bool:
-        return self.settings.value("audio_only", "false") == "true"
+        return self.settings.value("quality", "best") == "audio"
+
+    @property
+    def cookies_browser(self) -> str:
+        return self.settings.value("cookies_browser", "")
 
     # -------------------------------------------------------- Get Music tab
 
@@ -322,6 +293,11 @@ class MainWindow(QMainWindow):
         outer.addLayout(bar)
 
         filters = QHBoxLayout()
+        self.artist_filter = QComboBox()
+        self.artist_filter.addItem("All bands", None)
+        self.artist_filter.setToolTip("Narrow the hub down to one band.")
+        self.artist_filter.currentIndexChanged.connect(self.refresh_tree)
+        filters.addWidget(self.artist_filter)
         self.f_new = QCheckBox("Still to download")
         self.f_dupes = QCheckBox("Only shows with multiple versions")
         self.f_ignored = QCheckBox("Show ignored")
@@ -341,29 +317,23 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Show / version", "Source", "Length",
                                    "Quality", "Views", "Status"])
-        self.tree.setColumnWidth(0, 520)
+        self.tree.setColumnWidth(0, 330)
+        for col, width in ((1, 78), (2, 66), (3, 60), (4, 74), (5, 92)):
+            self.tree.setColumnWidth(col, width)
         self.tree.setAlternatingRowColors(True)
         self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(self.open_recording_page)
         split.addWidget(self.tree)
 
-        qpanel = QWidget()
-        qlay = QVBoxLayout(qpanel)
-        qlay.addWidget(QLabel("Download queue (one at a time)"))
-        self.queue_list = QListWidget()
-        qlay.addWidget(self.queue_list, 1)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1000)
-        self.progress.setValue(0)
-        qlay.addWidget(self.progress)
-        self.progress_label = QLabel("idle")
-        self.progress_label.setWordWrap(True)
-        qlay.addWidget(self.progress_label)
-        split.addWidget(qpanel)
-        split.setSizes([820, 340])
+        split.addWidget(self._build_queue_panel())
+        split.setSizes([700, 560])
         outer.addWidget(split, 1)
 
         btns = QHBoxLayout()
+        b_preview = QPushButton("👁 Preview ...")
+        b_preview.setToolTip("Look at the thumbnail and skip through the video "
+                             "before spending gigabytes on it.")
+        b_preview.clicked.connect(self.preview_selected)
         b_queue = QPushButton("⬇ Queue selected")
         b_queue.setToolTip("Queues each selected version. Selecting a show row "
                            "queues its suggested best version.")
@@ -372,11 +342,107 @@ class MainWindow(QMainWindow):
         b_ignore.setToolTip("Hide a duplicate you don't want; it stays in the "
                             "catalog but out of your way.")
         b_ignore.clicked.connect(self.ignore_selected)
+        btns.addWidget(b_preview)
         btns.addWidget(b_queue)
+        btns.addWidget(QLabel("at"))
+        self.quality_box = QComboBox()
+        for label, key in QUALITY_CHOICES:
+            self.quality_box.addItem(label, key)
+        saved_q = self.settings.value("quality", "best")
+        idx = self.quality_box.findData(saved_q)
+        self.quality_box.setCurrentIndex(max(idx, 0))
+        self.quality_box.setToolTip("Quality for newly queued downloads. "
+                                    "Each item in the queue keeps the setting "
+                                    "it was added with, and can be changed "
+                                    "there.")
+        self.quality_box.currentIndexChanged.connect(
+            lambda: self.settings.setValue("quality",
+                                           self.quality_box.currentData()))
+        btns.addWidget(self.quality_box)
         btns.addWidget(b_ignore)
         btns.addStretch(1)
         outer.addLayout(btns)
         return w
+
+    # ------------------------------------------------------- queue panel
+
+    def _build_queue_panel(self) -> QWidget:
+        panel = QWidget()
+        lay = QVBoxLayout(panel)
+
+        head = QHBoxLayout()
+        head.addWidget(QLabel("<b>Downloads</b> (one at a time)"))
+        head.addStretch(1)
+        self.pause_btn = QPushButton("⏸ Pause queue")
+        self.pause_btn.setToolTip("Stop starting new downloads. Anything "
+                                  "already running is left to finish.")
+        self.pause_btn.clicked.connect(self.toggle_queue_paused)
+        head.addWidget(self.pause_btn)
+        lay.addLayout(head)
+
+        self.queue_tree = QTreeWidget()
+        self.queue_tree.setHeaderLabels(["", "Item", "Quality", "Progress",
+                                         "Status"])
+        self.queue_tree.setRootIsDecorated(False)
+        self.queue_tree.setAlternatingRowColors(True)
+        self.queue_tree.setSelectionMode(QTreeWidget.ExtendedSelection)
+        self.queue_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.queue_tree.customContextMenuRequested.connect(self._queue_menu)
+        h = self.queue_tree.header()
+        h.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.queue_tree.setColumnWidth(0, 24)
+        h.setSectionResizeMode(1, QHeaderView.Stretch)
+        for col, width in ((2, 62), (3, 62), (4, 150)):
+            h.setSectionResizeMode(col, QHeaderView.Interactive)
+            self.queue_tree.setColumnWidth(col, width)
+        lay.addWidget(self.queue_tree, 1)
+
+        row1 = QHBoxLayout()
+        for text, slot, tip in (
+            ("Cancel", self.queue_cancel_selected,
+             "Stop a running download, or drop a waiting one."),
+            ("Remove", self.queue_remove_selected,
+             "Take the item out of the list."),
+            ("Retry", self.queue_retry_selected,
+             "Put a failed or cancelled item back in the queue."),
+        ):
+            b = QPushButton(text)
+            b.setToolTip(tip)
+            b.clicked.connect(slot)
+            row1.addWidget(b)
+        row1.addStretch(1)
+        b_up = QPushButton("▲")
+        b_up.setToolTip("Move up the queue")
+        b_up.clicked.connect(lambda: self.queue_move_selected(-1))
+        b_down = QPushButton("▼")
+        b_down.setToolTip("Move down the queue")
+        b_down.clicked.connect(lambda: self.queue_move_selected(1))
+        row1.addWidget(b_up)
+        row1.addWidget(b_down)
+        lay.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        b_clear_done = QPushButton("Clear finished")
+        b_clear_done.setToolTip("Remove completed, failed and cancelled items "
+                                "from the list.")
+        b_clear_done.clicked.connect(self.queue_clear_finished)
+        b_clear_all = QPushButton("Clear all")
+        b_clear_all.setToolTip("Empty the queue. A download in progress is "
+                               "cancelled.")
+        b_clear_all.clicked.connect(self.queue_clear_all)
+        row2.addWidget(b_clear_done)
+        row2.addWidget(b_clear_all)
+        row2.addStretch(1)
+        lay.addLayout(row2)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1000)
+        self.progress.setValue(0)
+        lay.addWidget(self.progress)
+        self.progress_label = QLabel("idle")
+        self.progress_label.setWordWrap(True)
+        lay.addWidget(self.progress_label)
+        return panel
 
     def start_search(self):
         if self.search_worker and self.search_worker.isRunning():
@@ -410,18 +476,24 @@ class MainWindow(QMainWindow):
             msg += f"  Problems: {errors}"
         self.statusBar().showMessage(msg)
         self.refresh_tree()
+        self.refresh_artists()
 
     def refresh_tree(self):
         self.tree.clear()
         downloaded = self.cat["downloaded"]
         ignored = self.cat["ignored"]
         needle = self.f_text.text().strip().lower()
-        pending = {j.payload["rec"]["id"] for j, _ in self.active_jobs.values()
-                   if j.kind == "download"}
+        pending = {j.payload["rec"]["id"] for j in self.queue.jobs()
+                   if j.kind == "download" and not j.is_finished
+                   and j.payload.get("rec")}
 
         bold = QFont()
         bold.setBold(True)
+        only_artist = (self.artist_filter.currentData()
+                       if hasattr(self, "artist_filter") else None)
         for g in cat_mod.group_recordings(self.cat):
+            if only_artist and g.get("artist") != only_artist:
+                continue
             recs = [r for r in g["recordings"]
                     if self.f_ignored.isChecked() or r["id"] not in ignored]
             if not recs:
@@ -479,18 +551,46 @@ class MainWindow(QMainWindow):
         if not ids:
             self.statusBar().showMessage("Select one or more versions first.")
             return
+        quality = self.quality_box.currentData() or "best"
+        added = skipped = 0
         for rid in ids:
             rec = self.cat["recordings"].get(rid)
-            if not rec or rid in self.cat["downloaded"]:
+            if not rec:
                 continue
-            if any(j.kind == "download" and j.payload["rec"]["id"] == rid
-                   for j, _ in self.active_jobs.values()):
+            if rid in self.cat["downloaded"] or self.queue.has_job_for(rid):
+                skipped += 1
                 continue
-            job = Job("download", rec["title"][:70],
-                      {"rec": rec, "collection": str(self.collection_dir),
-                       "audio_only": self.audio_only})
-            self._enqueue(job)
+            self._enqueue(Job("download", rec["title"][:70],
+                              {"rec": rec, "collection": str(self.collection_dir),
+                               "quality": quality,
+                               "cookies_browser": self.cookies_browser}))
+            added += 1
+        if skipped:
+            self.statusBar().showMessage(
+                f"Queued {added}; skipped {skipped} already downloaded or queued.")
         self.refresh_tree()
+
+    def preview_selected(self):
+        ids = self._selected_rec_ids()
+        if not ids:
+            self.statusBar().showMessage("Select a version to preview first.")
+            return
+        rec = self.cat["recordings"].get(ids[0])
+        if not rec:
+            return
+        from .preview import PreviewDialog
+        dlg = PreviewDialog(rec, rec["id"] in self.cat["downloaded"],
+                            self.cookies_browser, self)
+        dlg.exec()
+        if dlg.queue_requested and rec["id"] not in self.cat["downloaded"]:
+            if self.queue.has_job_for(rec["id"]):
+                self.statusBar().showMessage("That one is already in the queue.")
+                return
+            self._enqueue(Job("download", rec["title"][:70],
+                              {"rec": rec, "collection": str(self.collection_dir),
+                               "quality": self.quality_box.currentData() or "best",
+                               "cookies_browser": self.cookies_browser}))
+            self.refresh_tree()
 
     def ignore_selected(self):
         for rid in self._selected_rec_ids():
@@ -737,6 +837,143 @@ class MainWindow(QMainWindow):
         if s:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(s["dir"].resolve())))
 
+    # ---------------------------------------------------------- Artists tab
+
+    def _build_artists_tab(self) -> QWidget:
+        w = QWidget()
+        lay = QVBoxLayout(w)
+        lay.addWidget(QLabel(
+            "Every band in your catalog, and how far through each one you are. "
+            "Removing a band clears it from the hub — files already on disk are "
+            "left alone."))
+
+        self.artist_tree = QTreeWidget()
+        self.artist_tree.setHeaderLabels(
+            ["Band / artist", "Shows found", "Downloaded", "Split",
+             "Ignored", "Still to get", "Status"])
+        self.artist_tree.setRootIsDecorated(False)
+        self.artist_tree.setAlternatingRowColors(True)
+        self.artist_tree.setColumnWidth(0, 280)
+        self.artist_tree.itemDoubleClicked.connect(
+            lambda *_: self.focus_selected_artist())
+        lay.addWidget(self.artist_tree, 1)
+
+        btns = QHBoxLayout()
+        b_focus = QPushButton("Show in Get Music")
+        b_focus.setToolTip("Filter the Get Music list down to this band.")
+        b_focus.clicked.connect(self.focus_selected_artist)
+        b_search = QPushButton("Search again")
+        b_search.setToolTip("Look for new uploads for this band.")
+        b_search.clicked.connect(self.search_selected_artist)
+        self.b_done = QPushButton("Mark as done")
+        self.b_done.setToolTip("Flag a band you've finished collecting. "
+                               "Purely a marker — nothing is deleted.")
+        self.b_done.clicked.connect(self.toggle_selected_artist_done)
+        b_remove = QPushButton("🗑 Remove from hub")
+        b_remove.setToolTip("Forget this band and all its catalogued "
+                            "recordings. Downloaded files stay on disk.")
+        b_remove.clicked.connect(self.remove_selected_artist)
+        for b in (b_focus, b_search, self.b_done):
+            btns.addWidget(b)
+        btns.addStretch(1)
+        btns.addWidget(b_remove)
+        lay.addLayout(btns)
+        return w
+
+    def _selected_artist(self) -> str | None:
+        items = self.artist_tree.selectedItems()
+        return items[0].data(0, ARTIST_ROLE) if items else None
+
+    def refresh_artists(self):
+        if not hasattr(self, "artist_tree"):
+            return
+        previous = self._selected_artist()
+        self.artist_tree.clear()
+        for st in cat_mod.artist_stats(self.cat, getattr(self, "shows", [])):
+            if st["marked_done"]:
+                status = "✓ done (marked)"
+            elif st["complete"]:
+                status = "✓ all downloaded"
+            elif st["downloaded"]:
+                status = f"in progress"
+            else:
+                status = "nothing downloaded yet"
+            item = QTreeWidgetItem([
+                st["artist"], str(st["found"]), str(st["downloaded"]),
+                str(st["split"]), str(st["ignored"]), str(st["remaining"]),
+                status])
+            item.setData(0, ARTIST_ROLE, st["artist"])
+            self.artist_tree.addTopLevelItem(item)
+            if st["artist"] == previous:
+                item.setSelected(True)
+        self._sync_artist_filter()
+
+    def focus_selected_artist(self):
+        artist = self._selected_artist()
+        if not artist:
+            return
+        idx = self.artist_filter.findData(artist)
+        if idx >= 0:
+            self.artist_filter.setCurrentIndex(idx)
+        self.centralWidget().setCurrentIndex(0)
+
+    def search_selected_artist(self):
+        artist = self._selected_artist()
+        if not artist:
+            return
+        self.artist_edit.setText(artist)
+        self.centralWidget().setCurrentIndex(0)
+        self.start_search()
+
+    def toggle_selected_artist_done(self):
+        artist = self._selected_artist()
+        if not artist:
+            return
+        done = bool(self.cat.get("finished_artists", {}).get(artist))
+        cat_mod.set_artist_done(self.cat, artist, not done)
+        self.save_catalog()
+        self.refresh_artists()
+
+    def remove_selected_artist(self):
+        artist = self._selected_artist()
+        if not artist:
+            self.statusBar().showMessage("Select a band first.")
+            return
+        n = sum(1 for r in self.cat["recordings"].values()
+                if (r.get("artist") or "Unknown") == artist)
+        have = sum(1 for rid, r in self.cat["recordings"].items()
+                   if (r.get("artist") or "Unknown") == artist
+                   and rid in self.cat["downloaded"])
+        note = (f"\n\n{have} of them are downloaded — those files stay on disk "
+                f"in your collection folder, and will reappear in the "
+                f"Collection tab." if have else "")
+        if QMessageBox.question(
+                self, "Remove band from hub",
+                f"Remove “{artist}” and its {n} catalogued recording(s) from "
+                f"the hub?{note}") != QMessageBox.Yes:
+            return
+        removed = cat_mod.remove_artist(self.cat, artist)
+        self.save_catalog()
+        self.statusBar().showMessage(
+            f"Removed “{artist}” ({removed} recordings) from the hub.")
+        self.refresh_artists()
+        self.refresh_tree()
+
+    def _sync_artist_filter(self):
+        """Keep the Get Music artist filter in step with the catalog."""
+        if not hasattr(self, "artist_filter"):
+            return
+        current = self.artist_filter.currentData()
+        self.artist_filter.blockSignals(True)
+        self.artist_filter.clear()
+        self.artist_filter.addItem("All bands", None)
+        for a in sorted(cat_mod.artists_in(self.cat), key=str.lower):
+            if a:
+                self.artist_filter.addItem(a, a)
+        idx = self.artist_filter.findData(current)
+        self.artist_filter.setCurrentIndex(max(idx, 0))
+        self.artist_filter.blockSignals(False)
+
     # --------------------------------------------------------- Settings tab
 
     def _build_settings_tab(self) -> QWidget:
@@ -756,16 +993,42 @@ class MainWindow(QMainWindow):
                                       "a video has no chapters/timestamps")
         form.addRow("setlist.fm API key", self.s_key)
 
-        self.s_audio_only = QCheckBox("Download audio only (skip video streams)")
-        self.s_audio_only.setChecked(self.audio_only)
-        form.addRow("", self.s_audio_only)
+        self.s_quality = QComboBox()
+        for label, key in QUALITY_CHOICES:
+            self.s_quality.addItem(label, key)
+        qi = self.s_quality.findData(self.settings.value("quality", "best"))
+        self.s_quality.setCurrentIndex(max(qi, 0))
+        self.s_quality.setToolTip("Used for newly queued downloads. Individual "
+                                  "items can be changed in the queue.")
+        form.addRow("Default download quality", self.s_quality)
+
+        self.s_cookies = QComboBox()
+        for label, key in COOKIE_BROWSERS:
+            self.s_cookies.addItem(label, key)
+        ci = self.s_cookies.findData(self.cookies_browser)
+        self.s_cookies.setCurrentIndex(max(ci, 0))
+        self.s_cookies.setToolTip(
+            "If YouTube says “sign in to confirm you're not a bot”, pick the "
+            "browser you watch YouTube in. Downloads then reuse that browser's "
+            "sign-in. Nothing is uploaded anywhere.")
+        form.addRow("Use cookies from browser", self.s_cookies)
 
         save = QPushButton("Save settings")
         save.clicked.connect(self._save_settings)
         form.addRow("", save)
+
+        problem = check_ffmpeg()
+        ff = QLabel(problem if problem
+                    else "✓ ffmpeg found — audio extraction and splitting "
+                         "are available.")
+        ff.setWordWrap(True)
+        if problem:
+            ff.setStyleSheet("color:#c0392b;")
+        form.addRow("ffmpeg", ff)
         form.addRow("", QLabel(
-            "Requires ffmpeg on your PATH.  Keep yt-dlp up to date "
-            "(pip install -U yt-dlp) — YouTube changes regularly."))
+            "Keep yt-dlp up to date — YouTube changes regularly and downloads "
+            "start failing when it goes stale.\n"
+            "Windows: run update.bat.   Otherwise: pip install -U yt-dlp"))
         return w
 
     def _pick_dir(self):
@@ -778,25 +1041,128 @@ class MainWindow(QMainWindow):
         self.settings.setValue("collection_dir", self.s_dir.text().strip()
                                or "collection")
         self.settings.setValue("setlist_key", self.s_key.text().strip())
-        self.settings.setValue("audio_only",
-                               "true" if self.s_audio_only.isChecked() else "false")
+        quality = self.s_quality.currentData() or "best"
+        self.settings.setValue("quality", quality)
+        self.settings.setValue("cookies_browser",
+                               self.s_cookies.currentData() or "")
+        idx = self.quality_box.findData(quality)
+        if idx >= 0:
+            self.quality_box.setCurrentIndex(idx)
         self.statusBar().showMessage("Settings saved.")
         self.refresh_collection()
+        self.refresh_artists()
 
     # ---------------------------------------------------------- job plumbing
 
     def _enqueue(self, job: Job):
-        item = QListWidgetItem(f"⏳ {job.label}")
-        self.queue_list.addItem(item)
-        self.active_jobs[job.id] = (job, item)
-        self.worker.submit(job)
+        self.queue.submit(job)
         self.statusBar().showMessage(f"Queued: {job.label}")
 
-    def on_job_started(self, jid):
-        entry = self.active_jobs.get(jid)
-        if entry:
-            entry[1].setText(f"▶ {entry[0].label}")
-            self.progress_label.setText(entry[0].label)
+    STATUS_ICON = {QUEUED: "⏳", RUNNING: "▶", DONE: "✓",
+                   FAILED: "✗", CANCELLED: "⊘"}
+
+    def refresh_queue(self):
+        """Redraw the queue list from the worker's authoritative state."""
+        selected = {i.data(0, JOB_ROLE) for i in self.queue_tree.selectedItems()}
+        self.queue_tree.clear()
+        jobs = self.queue.jobs()
+        for j in jobs:
+            pct = (f"{int(j.progress * 100)}%"
+                   if j.status == RUNNING and j.progress >= 0
+                   else "100%" if j.status == DONE else "")
+            quality = (QUALITY_SHORT.get(j.quality, j.quality)
+                       if j.kind == "download" else "—")
+            status = j.status if not j.message else f"{j.status} — {j.message}"
+            item = QTreeWidgetItem([self.STATUS_ICON.get(j.status, ""),
+                                    j.label, quality, pct, status])
+            item.setData(0, JOB_ROLE, j.id)
+            item.setToolTip(4, j.message or j.status)
+            self.queue_tree.addTopLevelItem(item)
+            if j.id in selected:
+                item.setSelected(True)
+
+        paused = self.queue.is_paused()
+        self.pause_btn.setText("▶ Resume queue" if paused else "⏸ Pause queue")
+        running = any(j.status == RUNNING for j in jobs)
+        waiting = sum(1 for j in jobs if j.status == QUEUED)
+        if paused:
+            self.progress_label.setText(
+                f"queue paused — {waiting} waiting" if not running
+                else f"queue paused — finishing current download, "
+                     f"{waiting} waiting")
+        elif not running and not waiting:
+            self.progress_label.setText("idle")
+            self.progress.setRange(0, 1000)
+            self.progress.setValue(0)
+
+    def _selected_job_ids(self) -> list[str]:
+        return [i.data(0, JOB_ROLE) for i in self.queue_tree.selectedItems()]
+
+    def toggle_queue_paused(self):
+        self.queue.set_paused(not self.queue.is_paused())
+
+    def queue_cancel_selected(self):
+        for jid in self._selected_job_ids():
+            self.queue.cancel(jid)
+
+    def queue_remove_selected(self):
+        for jid in self._selected_job_ids():
+            self.queue.remove(jid)
+
+    def queue_retry_selected(self):
+        for jid in self._selected_job_ids():
+            self.queue.retry(jid)
+
+    def queue_move_selected(self, delta: int):
+        ids = self._selected_job_ids()
+        # move in the direction of travel so a multi-selection keeps its order
+        for jid in (ids if delta < 0 else reversed(ids)):
+            self.queue.move(jid, delta)
+
+    def queue_clear_finished(self):
+        n = self.queue.clear_finished()
+        self.statusBar().showMessage(f"Cleared {n} finished item(s).")
+
+    def queue_clear_all(self):
+        jobs = self.queue.jobs()
+        if not jobs:
+            return
+        running = any(j.status == RUNNING for j in jobs)
+        msg = ("Clear the whole queue?" if not running else
+               "Clear the whole queue and cancel the download in progress?")
+        if QMessageBox.question(self, "Clear queue", msg) != QMessageBox.Yes:
+            return
+        self.queue.clear_all()
+
+    def _queue_menu(self, pos):
+        item = self.queue_tree.itemAt(pos)
+        if not item:
+            return
+        jid = item.data(0, JOB_ROLE)
+        job = next((j for j in self.queue.jobs() if j.id == jid), None)
+        if job is None:
+            return
+        menu = QMenu(self)
+        if job.status == QUEUED and job.kind == "download":
+            sub = menu.addMenu("Change quality")
+            for label, key in QUALITY_CHOICES:
+                act = sub.addAction(label)
+                act.setCheckable(True)
+                act.setChecked(job.quality == key)
+                act.triggered.connect(
+                    lambda _=False, k=key, i=jid: self.queue.set_quality(i, k))
+        if job.status in (QUEUED, RUNNING):
+            menu.addAction("Cancel", lambda: self.queue.cancel(jid))
+        if job.is_finished:
+            menu.addAction("Retry", lambda: self.queue.retry(jid))
+        menu.addAction("Remove from list", lambda: self.queue.remove(jid))
+        if job.kind == "download":
+            rec = job.payload.get("rec") or {}
+            if rec.get("url"):
+                menu.addSeparator()
+                menu.addAction("Open source page", lambda: QDesktopServices.openUrl(
+                    QUrl(rec["url"])))
+        menu.exec(self.queue_tree.viewport().mapToGlobal(pos))
 
     def on_job_progress(self, jid, frac, msg):
         if frac < 0:
@@ -805,22 +1171,27 @@ class MainWindow(QMainWindow):
             self.progress.setRange(0, 1000)
             self.progress.setValue(int(frac * 1000))
         self.progress_label.setText(msg)
+        # keep the row's percentage column live without a full rebuild
+        for i in range(self.queue_tree.topLevelItemCount()):
+            it = self.queue_tree.topLevelItem(i)
+            if it.data(0, JOB_ROLE) == jid:
+                it.setText(3, f"{int(frac * 100)}%" if frac >= 0 else "")
+                it.setText(4, msg or RUNNING)
+                break
 
     def on_job_finished(self, jid, ok, msg, result):
-        entry = self.active_jobs.pop(jid, None)
+        job = next((j for j in self.queue.jobs() if j.id == jid), None)
         self.progress.setRange(0, 1000)
         self.progress.setValue(1000 if ok else 0)
         self.progress_label.setText("idle")
-        if entry:
-            job, item = entry
-            item.setText(f"{'✓' if ok else '✗'} {job.label} — {msg}")
+        if job:
             if ok and job.kind == "download":
                 self.cat["downloaded"][job.payload["rec"]["id"]] = result["dest"]
                 self.save_catalog()
-            if not ok:
+            if not ok and job.status != CANCELLED:
                 QMessageBox.warning(self, "Job failed",
                                     f"{job.label}\n\n{msg}")
-            elif result and result.get("warnings"):
+            elif ok and result and result.get("warnings"):
                 QMessageBox.information(
                     self, "Tracklist didn't match the audio",
                     "The tracklist disagreed with the actual recording:\n\n"
@@ -830,6 +1201,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(msg)
         self.refresh_tree()
         self.refresh_collection()
+        self.refresh_artists()
 
     # -------------------------------------------------------------- helpers
 
@@ -837,15 +1209,17 @@ class MainWindow(QMainWindow):
         cat_mod.save(self.cat, self.catalog_path)
 
     def closeEvent(self, event):
-        if self.active_jobs:
+        busy = [j for j in self.queue.jobs() if j.status in (RUNNING, QUEUED)]
+        if busy:
             r = QMessageBox.question(
                 self, "Quit?",
-                "A download or split is still running — quit anyway?")
+                f"{len(busy)} download/split job(s) are still queued or "
+                f"running — quit anyway?")
             if r != QMessageBox.Yes:
                 event.ignore()
                 return
-        self.worker.shutdown()
-        self.worker.wait(1000)
+        self.queue.shutdown()
+        self.queue.wait(2000)
         event.accept()
 
 

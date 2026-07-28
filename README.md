@@ -6,15 +6,53 @@ live recordings. It searches **YouTube** and the **Internet Archive
 best version, downloads your pick, records where and when it was filmed, then
 extracts the audio and cuts it into individually named, tagged FLAC tracks.
 
-## Requirements
+## Installing on Windows
 
-- Python 3.9+
-- [ffmpeg](https://ffmpeg.org/) (with `ffprobe`) on your PATH
-- `pip install -r requirements.txt` (pulls in `yt-dlp`, `requests`, `PySide6`),
-  or install the tool itself with `pip install .`
+1. Install **Python 3.9 or newer** from <https://www.python.org/downloads/> —
+   tick **"Add python.exe to PATH"** in the installer.
+2. Install **ffmpeg**: grab the *release full* zip from
+   <https://www.gyan.dev/ffmpeg/builds/>, unzip it, and either add its `bin`
+   folder to PATH **or** drop the whole `ffmpeg` folder next to `run.bat` so
+   that `ffmpeg\bin\ffmpeg.exe` sits beside it. The app looks in both places,
+   plus the usual winget/chocolatey/scoop locations.
+3. Double-click **`run.bat`**.
+
+The first run builds a private Python environment in `.venv` and installs
+what it needs — a minute or two, once. Every run after that just opens the
+app. If Python or ffmpeg is missing, `run.bat` says so in plain English
+instead of flashing a console and vanishing.
+
+**`update.bat`** updates yt-dlp. Run it when YouTube downloads start
+failing — that is nearly always the cause.
+
+Downloads work without ffmpeg; extracting and splitting audio do not. The
+Settings tab tells you which state you are in.
+
+### macOS / Linux
+
+```
+./run.sh
+```
+
+Same idea: `python3`, `ffmpeg` (`brew install ffmpeg` / `apt install ffmpeg`),
+then the script sets up `.venv` on first run.
+
+### Manual install (any platform)
+
+```
+pip install -r requirements.txt     # yt-dlp, requests, PySide6
+python -m livearchiver.cli gui
+```
 
 Optional: a free [setlist.fm API key](https://api.setlist.fm/docs/1.0/index.html)
 for automatic track naming when a video has no chapters or timestamps.
+
+### If YouTube says "sign in to confirm you're not a bot"
+
+YouTube sometimes challenges a computer it doesn't recognise. In **Settings →
+Use cookies from browser**, pick the browser you normally watch YouTube in
+(sign in there first). Downloads and previews then reuse that browser's
+session. Nothing is uploaded anywhere.
 
 > Note: this tool is for personal archival use. Live recordings are still the
 > artists'/rights-holders' property — keep the archive private and support the
@@ -26,24 +64,69 @@ for automatic track naming when a video has no chapters or timestamps.
 livearchiver gui        # or: livearchiver-gui
 ```
 
-A native Qt desktop app (no browser, no HTML) with three tabs:
+A native Qt desktop app (no browser, no HTML) with four tabs:
 
 - **Get Music** — type the **band/artist** at the top, hit *Search sources*
   to query YouTube and archive.org in the background (plus an optional extra
   search of your own, e.g. a specific venue or year). Results appear grouped
   by show with every duplicate version side by side — source, length,
-  quality, views — with the suggested best version marked. Filters: *Still to
-  download* (what's missing from your collection), *only shows with multiple
-  versions*, and free-text. Select versions and *Queue selected* — the
-  **download queue runs strictly one at a time**, with a live progress bar.
+  quality, views — with the suggested best version marked. Filters: a band
+  dropdown, *Still to download*, *only shows with multiple versions*, and
+  free-text. **Preview** a version before committing to it (see below), then
+  *Queue selected* at whatever quality you choose.
   *Ignore selected version* hides duplicates you've rejected. Double-click
   any row to open the original page in your browser.
+- **Artists** — every band in the catalog with its progress: shows found,
+  downloaded, split, ignored, still to get, and whether it's finished. Mark a
+  band done, filter the hub to it, search it again, or **remove it from the
+  hub** entirely when you've lost interest — that clears it from the catalog
+  and leaves any files already on disk alone.
 - **Collection** — everything you have (all artists, one folder each): each
   show with its date, place, source link, uploader, the original description,
   and the track list with split status. Shows that still need a human get a
   **⚠ marking** — date or place unknown, tracks not identified, or no
   tracklist found — and a *Needs attention only* filter lists just those.
-- **Settings** — collection folder, setlist.fm API key, audio-only mode.
+- **Settings** — collection folder, setlist.fm API key, default download
+  quality, browser cookies, and whether ffmpeg was found.
+
+## The download queue
+
+The queue behaves like a download manager, not a fire-and-forget list. It
+still runs **one job at a time** on purpose — a dozen parallel downloads of
+multi-gigabyte concert video helps nobody — but you control it:
+
+- **Pause / resume** the queue. Pausing stops *new* jobs starting; whatever
+  is already downloading is left to finish.
+- **Cancel** a download in flight. Partly-written files are deleted, so a
+  cancelled download leaves nothing behind.
+- **Remove** items, **retry** failed or cancelled ones, **reorder** with the
+  up/down buttons, and **clear finished** or **clear all**.
+- **Per-item quality**: best available, 1080p, 720p, 480p, or audio only.
+  New items take the quality shown next to *Queue selected*; right-click any
+  waiting item to change just that one.
+- Right-click also offers cancel, retry, remove and *open source page*.
+- Live progress with speed and ETA, and a status column showing exactly what
+  each item is doing or why it failed.
+
+Queueing something you already have — or already queued — is skipped rather
+than duplicated.
+
+## Previewing before you download
+
+Select a version and press **Preview**. You get the thumbnail, the full
+metadata, and the source link straight away. Press **Stream preview** and the
+video plays *in the app* without anything being written to disk — yt-dlp
+resolves a direct stream URL and Qt plays it.
+
+The point is skipping around: drag the scrub bar, or use the **Skip to**
+buttons (start / 10% / 25% / 50% / 75% / near end). Ten seconds at three
+points in an hour-long upload tells you whether it's the whole show, a phone
+recording from the back of the room, or a re-upload of something you already
+have. If you like it, **Queue download** straight from the preview.
+
+Streaming is a YouTube feature; for archive.org items use *Open in browser*,
+which streams them directly. If a stream can't start, the thumbnail and
+metadata are still there and downloading is unaffected.
 
 The GUI and CLI share the same `catalog.json` and collection folder — use
 whichever you like, they stay in sync.

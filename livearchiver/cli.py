@@ -59,7 +59,8 @@ def cmd_download(args) -> int:
             rc = 1
             continue
         try:
-            dest = download(rec, args.dir, audio_only=args.audio_only)
+            dest = download(rec, args.dir, quality=args.quality,
+                            cookies_browser=args.cookies_from_browser)
         except Exception as e:
             log.error("download of %s failed: %s", rid, e)
             rc = 1
@@ -171,8 +172,13 @@ def main(argv=None) -> int:
                    help="recording ids from 'list' (yt:... or ia:...)")
     p.add_argument("--dir", type=Path, default=Path("collection"),
                    help="collection root (default: ./collection)")
-    p.add_argument("--audio-only", action="store_true",
-                   help="skip the video stream, download audio only")
+    p.add_argument("--quality", default="best",
+                   choices=["best", "1080", "720", "480", "audio"],
+                   help="download quality (default: best)")
+    p.add_argument("--cookies-from-browser", default="",
+                   help="browser to take YouTube cookies from when YouTube "
+                        "asks you to prove you are not a bot "
+                        "(chrome, firefox, edge, brave, ...)")
     p.set_defaults(fn=cmd_download)
 
     p = sub.add_parser("split", parents=[common], help="extract audio and cut into named tracks")

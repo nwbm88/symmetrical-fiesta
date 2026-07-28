@@ -23,12 +23,42 @@ from typing import Optional
 
 import requests
 
+from .platformsupport import safe_filename, is_bot_check, BOT_CHECK_HELP
+
 log = logging.getLogger("livearchiver")
 
 
+class _Cancelled(Exception):
+    """Internal: unwinds yt-dlp from inside its progress hook."""
+
+
+def _has_cancel(exc: BaseException) -> bool:
+    """yt-dlp re-wraps exceptions raised in hooks, so walk the chain."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, _Cancelled):
+            return True
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return False
+
+
+def _clean_partial(dest: Path):
+    """Drop half-written files so a cancelled download leaves no debris."""
+    for p in dest.glob("source.*"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    for p in dest.glob("*.part"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def _safe(name: str, maxlen: int = 120) -> str:
-    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).strip(" .")
-    return name[:maxlen] or "untitled"
+    return safe_filename(name, maxlen)
 
 
 def show_dir_name(rec: dict) -> str:
@@ -38,16 +68,27 @@ def show_dir_name(rec: dict) -> str:
 
 
 def download(rec: dict, collection: Path, audio_only: bool = False,
-             progress=None) -> Path:
-    """progress: optional callable(fraction_or_None, message)."""
+             progress=None, quality: str = None, should_cancel=None,
+             cookies_browser: str = "") -> Path:
+    """Fetch a recording into the collection.
+
+    progress:      callable(fraction_or_None, message)
+    quality:       key from jobs.QUALITY_CHOICES ("best", "720", "audio", ...)
+    should_cancel: callable returning True to abort the download
+    """
+    if quality is None:
+        quality = "audio" if audio_only else "best"
+    audio_only = quality == "audio"
     artist = rec.get("artist") or "Unknown Artist"
     dest = collection / _safe(artist) / show_dir_name(rec)
     dest.mkdir(parents=True, exist_ok=True)
 
     if rec["source"] == "youtube":
-        info = _download_youtube(rec, dest, audio_only, progress)
+        info = _download_youtube(rec, dest, quality, progress, should_cancel,
+                                 cookies_browser)
     elif rec["source"] == "archive.org":
-        info = _download_archive_org(rec, dest, audio_only, progress)
+        info = _download_archive_org(rec, dest, audio_only, progress,
+                                     should_cancel)
     else:
         raise ValueError(f"unknown source {rec['source']}")
 
@@ -98,26 +139,38 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
 
 # ---------------------------------------------------------------- YouTube
 
-def _download_youtube(rec: dict, dest: Path, audio_only: bool,
-                      progress=None) -> dict:
+def _download_youtube(rec: dict, dest: Path, quality: str,
+                      progress=None, should_cancel=None,
+                      cookies_browser: str = "") -> dict:
     from yt_dlp import YoutubeDL
+    from .jobs import format_string
+
+    audio_only = quality == "audio"
 
     def hook(d):
+        # The progress hook is the only place yt-dlp lets us interrupt a
+        # download in flight; raising here unwinds it cleanly.
+        if should_cancel and should_cancel():
+            raise _Cancelled()
         if not progress:
             return
         if d.get("status") == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
+            speed = (d.get("_speed_str") or "").strip()
+            eta = (d.get("_eta_str") or "").strip()
+            detail = " ".join(x for x in (speed, f"ETA {eta}" if eta else "") if x)
             if total:
                 progress(d.get("downloaded_bytes", 0) / total,
-                         f"downloading {d.get('_percent_str', '').strip()} "
-                         f"{d.get('_speed_str', '').strip()}")
+                         f"downloading {d.get('_percent_str', '').strip()} {detail}")
+            else:
+                progress(None, f"downloading {detail}")
         elif d.get("status") == "finished":
             progress(None, "merging/processing ...")
 
     opts = {
         "outtmpl": str(dest / "source.%(ext)s"),
         "writeinfojson": True,
-        "format": "bestaudio/best" if audio_only else "bestvideo+bestaudio/best",
+        "format": format_string(quality),
         "merge_output_format": None if audio_only else "mkv",
         "noplaylist": True,
         "progress_hooks": [hook],
@@ -126,8 +179,25 @@ def _download_youtube(rec: dict, dest: Path, audio_only: bool,
         "extractor_args": {"youtube": {"max_comments": ["150"],
                                        "comment_sort": ["top"]}},
     }
-    with YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(rec["url"], download=True)
+    if cookies_browser:
+        opts["cookiesfrombrowser"] = (cookies_browser,)
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(rec["url"], download=True)
+    except _Cancelled:
+        _clean_partial(dest)
+        from .jobs import JobCancelled
+        raise JobCancelled()
+    except Exception as e:
+        # yt-dlp wraps hook exceptions, so check for our marker in the chain
+        if _has_cancel(e):
+            _clean_partial(dest)
+            from .jobs import JobCancelled
+            raise JobCancelled()
+        if is_bot_check(str(e)):
+            _clean_partial(dest)
+            raise RuntimeError(BOT_CHECK_HELP) from e
+        raise
 
     files = [p.name for p in dest.iterdir() if p.name.startswith("source.")
              and not p.name.endswith(".info.json")]
@@ -150,7 +220,7 @@ VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".mpg", ".mpeg", ".mov")
 
 
 def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
-                          progress=None) -> dict:
+                          progress=None, should_cancel=None) -> dict:
     identifier = rec["id"].split(":", 1)[1]
     meta = requests.get(f"https://archive.org/metadata/{identifier}", timeout=30).json()
     files = meta.get("files", [])
@@ -175,6 +245,14 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
             r.raise_for_status()
             with open(out, "wb") as fh:
                 for chunk in r.iter_content(1 << 20):
+                    if should_cancel and should_cancel():
+                        fh.close()
+                        try:
+                            out.unlink()
+                        except OSError:
+                            pass
+                        from .jobs import JobCancelled
+                        raise JobCancelled()
                     fh.write(chunk)
                     done_bytes += len(chunk)
                     if progress and total_bytes:

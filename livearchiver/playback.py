@@ -18,12 +18,13 @@ Both backends expose the same small interface:
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import (QCoreApplication, QObject, QTimer, QElapsedTimer,
                             QUrl, Signal)
+
+from .platformsupport import ffplay as find_ffplay, popen_kwargs
 
 
 class _BasePlayer(QObject):
@@ -150,10 +151,11 @@ class FfplayPlayer(_BasePlayer):
             return
         self._kill()
         self._proc = subprocess.Popen(
-            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet",
+            [find_ffplay() or "ffplay", "-nodisp", "-autoexit",
+             "-loglevel", "quiet",
              "-ss", f"{self._base:.3f}", str(self.media)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL)
+            stderr=subprocess.DEVNULL, **popen_kwargs())
         self._clock.start()
         self._timer.start()
         self.stateChanged.emit(True)
@@ -192,7 +194,7 @@ def audio_output_available() -> bool:
 
 
 def ffplay_available() -> bool:
-    return shutil.which("ffplay") is not None
+    return find_ffplay() is not None
 
 
 def create_player(media: Path, duration: float = 0.0, parent=None,

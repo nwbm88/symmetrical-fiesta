@@ -25,6 +25,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, QRectF
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtCore import QPointF
+from .platformsupport import ffmpeg, popen_kwargs
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QScrollBar,
     QTreeWidget, QTreeWidgetItem, QWidget, QMessageBox, QDialogButtonBox,
@@ -63,9 +64,10 @@ class PeakLoader(QThread):
 
         try:
             proc = subprocess.Popen(
-                ["ffmpeg", "-v", "error", "-i", str(self.media),
+                [ffmpeg(), "-v", "error", "-i", str(self.media),
                  "-ac", "1", "-ar", str(DECODE_RATE), "-f", "s16le", "pipe:1"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                **popen_kwargs())
             bucket = DECODE_RATE // PEAK_RATE
             peaks: list[tuple[float, float]] = []
             carry = b""

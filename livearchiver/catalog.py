@@ -92,6 +92,76 @@ def artists_in(cat: dict) -> set[str]:
     return {r.get("artist") or "" for r in cat["recordings"].values()}
 
 
+def artist_stats(cat: dict, shows: Optional[list] = None) -> list[dict]:
+    """Per-artist progress for the Artists tab.
+
+    ``shows`` is the output of pipeline.scan_collection, used to count how
+    many downloaded shows are actually split into tracks.
+    """
+    downloaded = cat.get("downloaded", {})
+    ignored = cat.get("ignored", {})
+    finished = cat.get("finished_artists", {})
+
+    split_by_artist: dict[str, int] = {}
+    for s in shows or []:
+        if s.get("tracks"):
+            a = s.get("artist") or ""
+            split_by_artist[a] = split_by_artist.get(a, 0) + 1
+
+    out: dict[str, dict] = {}
+    for rec in cat["recordings"].values():
+        a = rec.get("artist") or "Unknown"
+        e = out.setdefault(a, {"artist": a, "found": 0, "downloaded": 0,
+                               "ignored": 0, "shows": set()})
+        e["found"] += 1
+        if rec["id"] in downloaded:
+            e["downloaded"] += 1
+        if rec["id"] in ignored:
+            e["ignored"] += 1
+        e["shows"].add(rec["show"].get("date") or rec["id"])
+
+    for a in split_by_artist:
+        out.setdefault(a, {"artist": a, "found": 0, "downloaded": 0,
+                           "ignored": 0, "shows": set()})
+
+    result = []
+    for a, e in out.items():
+        remaining = max(e["found"] - e["downloaded"] - e["ignored"], 0)
+        result.append({
+            "artist": a,
+            "found": e["found"],
+            "distinct_shows": len(e["shows"]),
+            "downloaded": e["downloaded"],
+            "ignored": e["ignored"],
+            "remaining": remaining,
+            "split": split_by_artist.get(a, 0),
+            "marked_done": bool(finished.get(a)),
+            "complete": remaining == 0 and e["downloaded"] > 0,
+        })
+    return sorted(result, key=lambda r: r["artist"].lower())
+
+
+def remove_artist(cat: dict, artist: str) -> int:
+    """Drop an artist and everything catalogued for them. Files on disk are
+    left alone — this only clears the hub."""
+    ids = [rid for rid, rec in cat["recordings"].items()
+           if (rec.get("artist") or "Unknown") == artist]
+    for rid in ids:
+        cat["recordings"].pop(rid, None)
+        cat.get("downloaded", {}).pop(rid, None)
+        cat.get("ignored", {}).pop(rid, None)
+    cat.get("finished_artists", {}).pop(artist, None)
+    return len(ids)
+
+
+def set_artist_done(cat: dict, artist: str, done: bool) -> None:
+    cat.setdefault("finished_artists", {})
+    if done:
+        cat["finished_artists"][artist] = True
+    else:
+        cat["finished_artists"].pop(artist, None)
+
+
 def _fmt_dur(seconds) -> str:
     if not seconds:
         return "  ?:??"
