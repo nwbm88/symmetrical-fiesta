@@ -89,6 +89,11 @@ A native Qt desktop app (no browser, no HTML) with four tabs:
 - **Settings** — collection folder, setlist.fm API key, default download
   quality, browser cookies, and whether ffmpeg was found.
 
+Every version row shows a **thumbnail** of the actual video, so you can tell
+a full stage shot from a phone recording at a glance. Images are fetched in
+the background and cached on disk, so they appear instantly next time; the
+*Thumbnails* checkbox turns them off if you prefer a dense list.
+
 ## The download queue
 
 The queue behaves like a download manager, not a fire-and-forget list. It
@@ -111,6 +116,14 @@ multi-gigabyte concert video helps nobody — but you control it:
 Queueing something you already have — or already queued — is skipped rather
 than duplicated.
 
+**Interrupted downloads resume.** If the app closes, the machine sleeps or
+the connection drops, the partly-downloaded file is kept and the next attempt
+picks up where it left off instead of starting a multi-gigabyte download
+again. (Explicitly *cancelling* still cleans up after itself — that's the
+difference between "I changed my mind" and "something went wrong".) Before a
+download starts, the free space on the collection drive is checked against
+what the download needs, so you find out up front rather than at 98%.
+
 ## Previewing before you download
 
 Select a version and press **Preview**. You get the thumbnail, the full
@@ -130,6 +143,45 @@ metadata are still there and downloading is unaffected.
 
 The GUI and CLI share the same `catalog.json` and collection folder — use
 whichever you like, they stay in sync.
+
+## Keeping the archive intact
+
+An archive meant to last needs to answer "is this still the file I
+downloaded?". Silent corruption, a truncated download and a half-written copy
+all look like perfectly ordinary files.
+
+- Every download records the **size and SHA-256** of its source files in
+  `checksums.json`.
+- **Verify files** (Collection tab) re-checks one show; **Verify whole
+  collection** checks everything; `livearchiver verify` does the same from
+  the command line, with `--quick` for a size-only pass that is instant and
+  still catches truncated and missing files.
+- Shows downloaded before this existed have no checksums — **Record
+  checksums** (or `livearchiver verify --record`) starts tracking them.
+- Derived audio is deliberately not hashed: the master and the split tracks
+  can always be regenerated from the source, and hashing gigabytes of FLAC
+  every time would make verification something you avoid running.
+
+**The catalogue is backed up on every save.** `catalog.json` holds the
+*curation* — which duplicate you chose, what you ignored, which bands are
+finished — and that is the part you cannot re-download. Rotating copies live
+in `catalog.backups/`, and the file is written via a temporary file so an
+interrupted save can't leave it truncated.
+
+## Finishing touches on split tracks
+
+After a show is cut into tracks, the archive gets what a serious collection
+is expected to have:
+
+- **A cue sheet** (`audio/show.cue`) describing the track boundaries against
+  the untouched master. FLAC + `.cue` is what taper communities trade in: it
+  reproduces the split exactly, and players that read cue sheets can navigate
+  the show without it being cut at all.
+- **Album art** — the source thumbnail is saved as `cover.jpg` at download
+  time and embedded in every track, so shows look like albums in any player.
+- **ReplayGain** tags, per track and per album. Audience recordings vary
+  enormously in level; without this, shuffling through the archive is a
+  volume-knob workout. Tags only — the audio is never re-encoded.
 
 ## How it finds the date, the place, and the tracklist
 
@@ -175,6 +227,14 @@ wrong and delete the ones that aren't song boundaries. *Save tracklist*
 writes the same `audio/tracks.json` the splitter uses, so *Save & queue split*
 cuts exactly what you drew.
 
+**Undo and redo** (Ctrl+Z / Ctrl+Y, or the toolbar buttons) cover every change
+to the cuts — adding, dragging, deleting, clearing and silence detection — so
+one mis-drag never loses careful work. Select a track in the table and the
+**arrow keys** nudge the cut that starts it (Shift for a bigger step), which
+is how you fine-tune a boundary once you can hear it's slightly off; Delete
+removes it. Dragging a marker **snaps** to a nearby detected silence, since
+that gap is almost always where the cut belongs.
+
 **Boost quiet audio** (on by default) scales the waveform display up to its
 loudest peak. Audience recordings are often very quiet — at true scale they
 draw as a flat line you can't read boundaries off. This affects the display
@@ -218,6 +278,9 @@ livearchiver list --new              # only shows you don't have yet
 livearchiver download yt:VIDEOID     # into collection/<Artist>/<date - venue>/
 livearchiver split "collection/Twenty One Pilots/2016-06-14 - Hallenstadion"
 livearchiver todo                    # every show still needing manual attention
+livearchiver verify                  # check files against recorded checksums
+livearchiver verify --quick          # size-only pass; instant
+livearchiver verify --record         # add checksums to older downloads
 ```
 
 `split --dry-run` previews the tracklist (written to an editable

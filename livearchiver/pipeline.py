@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import audio as audio_mod
+from . import tagging
 from .tracks import resolve_tracks
 
 log = logging.getLogger("livearchiver")
@@ -23,6 +24,8 @@ Progress = Callable[[Optional[float], str], None]
 def split_show(show_dir: Path, setlist_key: Optional[str] = None,
                noise: int = -35, min_silence: float = 1.5,
                redetect: bool = False, cut: bool = True,
+               write_cue: bool = True, album_art: bool = True,
+               replaygain: bool = True,
                progress: Optional[Progress] = None) -> dict:
     """Extract the audio master and cut it into named, tagged tracks.
 
@@ -74,12 +77,33 @@ def split_show(show_dir: Path, setlist_key: Optional[str] = None,
     if cut:
         def on_track(i, n, title):
             notify(i / n, f"cutting {i}/{n}: {title}")
-        files = audio_mod.cut_tracks(master, tracks, show,
-                                     artist=manifest.get("artist") or "Unknown Artist",
+        artist = manifest.get("artist") or "Unknown Artist"
+        files = audio_mod.cut_tracks(master, tracks, show, artist=artist,
                                      progress=on_track)
 
+        # Finishing pass: a cue sheet against the untouched master, the
+        # thumbnail as album art, and ReplayGain so a shuffle through the
+        # archive doesn't swing wildly in volume.
+        if write_cue or album_art or replaygain:
+            notify(None, "writing cue sheet / album art / ReplayGain ...")
+            try:
+                extras = tagging.finish_tracks(
+                    show_dir, tracks, files, show, artist,
+                    write_cue=write_cue, art=album_art,
+                    replaygain=replaygain, progress=progress)
+            except Exception as e:
+                log.warning("finishing pass failed: %s", e)
+                extras = {}
+        else:
+            extras = {}
+
+        return {"tracks": tracks, "strategy": strategy, "warnings": warnings,
+                "files": [str(f) for f in files], "master": str(master),
+                "extras": extras}
+
     return {"tracks": tracks, "strategy": strategy, "warnings": warnings,
-            "files": [str(f) for f in files], "master": str(master)}
+            "files": [str(f) for f in files], "master": str(master),
+            "extras": {}}
 
 
 _GENERIC_TRACK = re.compile(r"^\d\d - Track \d+\.flac$|^Track \d+$")

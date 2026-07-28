@@ -122,6 +122,38 @@ def cmd_todo(args) -> int:
     return 0
 
 
+def cmd_verify(args) -> int:
+    from .pipeline import scan_collection
+    from .integrity import verify_show, record_checksums, OK, NO_RECORD
+    shows = scan_collection(args.dir)
+    if not shows:
+        print(f"no shows found under {args.dir}")
+        return 0
+    bad = missing = 0
+    for s in shows:
+        if args.record:
+            record_checksums(s["dir"])
+            print(f"recorded  {s['dir']}")
+            continue
+        res = verify_show(s["dir"], quick=args.quick)
+        if res["status"] == OK:
+            print(f"ok        {s['dir']}")
+        elif res["status"] == NO_RECORD:
+            missing += 1
+            print(f"no record {s['dir']}  (run --record to add checksums)")
+        else:
+            bad += 1
+            print(f"PROBLEM   {s['dir']}")
+            for p in res["problems"]:
+                print(f"            - {p}")
+    if args.record:
+        print(f"\nrecorded checksums for {len(shows)} show(s)")
+    else:
+        print(f"\n{len(shows)} show(s): {len(shows)-bad-missing} ok, "
+              f"{bad} with problems, {missing} without checksums")
+    return 1 if bad else 0
+
+
 def cmd_gui(args) -> int:
     try:
         from .gui import run
@@ -202,6 +234,18 @@ def main(argv=None) -> int:
     p.add_argument("--dir", type=Path, default=Path("collection"),
                    help="collection root (default: ./collection)")
     p.set_defaults(fn=cmd_todo)
+
+    p = sub.add_parser("verify", parents=[common],
+                       help="check downloaded files against their checksums")
+    p.add_argument("--dir", type=Path, default=Path("collection"),
+                   help="collection root (default: ./collection)")
+    p.add_argument("--quick", action="store_true",
+                   help="compare sizes only — instant, still catches "
+                        "truncated and missing files")
+    p.add_argument("--record", action="store_true",
+                   help="record checksums for shows downloaded before this "
+                        "feature existed")
+    p.set_defaults(fn=cmd_verify)
 
     p = sub.add_parser("gui", parents=[common],
                        help="launch the desktop app (needs PySide6)")

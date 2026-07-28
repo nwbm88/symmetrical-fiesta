@@ -141,6 +141,7 @@ class WaveformView(QWidget):
     requestAdd = Signal(float)      # seconds — user double-clicked
     requestRemove = Signal(int)     # marker index — user right-clicked
     markerMoved = Signal(int, float)
+    dragStarted = Signal()          # so the dialog can checkpoint for undo
     seeked = Signal(float)          # user clicked to seek
     viewChanged = Signal()          # zoom/offset changed (sync scrollbar)
 
@@ -315,6 +316,7 @@ class WaveformView(QWidget):
             idx = self._marker_at(x)
             if idx is not None:
                 self._drag_idx = idx
+                self.dragStarted.emit()
             else:
                 self.seeked.emit(self._x_to_t(x))
             self.update()
@@ -391,6 +393,14 @@ class TimelineDialog(QDialog):
         self.b_detect.setToolTip("Add candidate markers at every quiet gap — "
                                  "then drag/delete them until they sit right.")
         self.b_detect.clicked.connect(self.detect_silences)
+        self.b_undo = QPushButton("↶ Undo")
+        self.b_undo.setToolTip("Undo the last change to the cuts (Ctrl+Z)")
+        self.b_undo.clicked.connect(self.undo)
+        self.b_undo.setEnabled(False)
+        self.b_redo = QPushButton("↷ Redo")
+        self.b_redo.setToolTip("Redo (Ctrl+Y)")
+        self.b_redo.clicked.connect(self.redo)
+        self.b_redo.setEnabled(False)
         b_clear = QPushButton("Clear markers")
         b_clear.clicked.connect(self.clear_markers)
         self.normalize_cb = QCheckBox("Boost quiet audio")
@@ -402,11 +412,12 @@ class TimelineDialog(QDialog):
         self.normalize_cb.toggled.connect(
             lambda on: self.view.set_normalize(on))
         for x in (self.play_btn, self.time_label, b_in, b_out, b_fit,
-                  self.b_detect, b_clear, self.normalize_cb):
+                  self.b_detect, self.b_undo, self.b_redo, b_clear,
+                  self.normalize_cb):
             bar.addWidget(x)
         bar.addStretch(1)
-        hint = QLabel("double-click: add cut · drag: move · right-click: delete "
-                      "· Ctrl+wheel: zoom")
+        hint = QLabel("double-click: add cut · drag: move · right-click: delete\n"
+                      "space: play/pause · ←/→ nudge marker · Ctrl+Z undo")
         hint.setStyleSheet("color: #888;")
         bar.addWidget(hint)
         lay.addLayout(bar)
@@ -415,6 +426,7 @@ class TimelineDialog(QDialog):
         self.view.requestAdd.connect(self.add_marker)
         self.view.requestRemove.connect(self.remove_marker)
         self.view.markerMoved.connect(self.marker_moved)
+        self.view.dragStarted.connect(self._checkpoint)
         self.view.seeked.connect(self.seek)
         self.view.viewChanged.connect(self._sync_scroll)
         lay.addWidget(self.view, 2)
@@ -447,8 +459,11 @@ class TimelineDialog(QDialog):
         # state
         self.markers: list[float] = []
         self.titles: list[str] = [""]
+        self._undo: list[tuple[list, list]] = []
+        self._redo: list[tuple[list, list]] = []
         self.duration = 0.0
         self._silence_worker = None
+        self._silence_points: list[float] = []
         self._load_existing()
 
         self.loader = PeakLoader(self.master, self)
@@ -576,23 +591,71 @@ class TimelineDialog(QDialog):
 
     # ------------------------------------------------------- marker editing
 
+    # ------------------------------------------------------------ undo/redo
+
+    UNDO_LIMIT = 100
+
+    def _checkpoint(self):
+        """Remember the current cuts so the next edit can be undone."""
+        self._undo.append((list(self.markers), list(self.titles)))
+        if len(self._undo) > self.UNDO_LIMIT:
+            self._undo.pop(0)
+        self._redo.clear()
+        self._update_undo_buttons()
+
+    def _update_undo_buttons(self):
+        if hasattr(self, "b_undo"):
+            self.b_undo.setEnabled(bool(self._undo))
+            self.b_redo.setEnabled(bool(self._redo))
+
+    def undo(self):
+        if not self._undo:
+            return
+        self._redo.append((list(self.markers), list(self.titles)))
+        self.markers, self.titles = self._undo.pop()
+        self.markers, self.titles = list(self.markers), list(self.titles)
+        self._push_state()
+        self._update_undo_buttons()
+
+    def redo(self):
+        if not self._redo:
+            return
+        self._undo.append((list(self.markers), list(self.titles)))
+        self.markers, self.titles = self._redo.pop()
+        self.markers, self.titles = list(self.markers), list(self.titles)
+        self._push_state()
+        self._update_undo_buttons()
+
+    # -------------------------------------------------------------- editing
+
     def add_marker(self, pos: float):
+        self._checkpoint()
         k = bisect.bisect_left(self.markers, pos)
         self.markers.insert(k, pos)
         self.titles.insert(k + 1, "")
         self._push_state()
 
     def remove_marker(self, idx: int):
+        self._checkpoint()
         self.markers.pop(idx)
         merged = self.titles[idx] or self.titles[idx + 1]
         self.titles[idx:idx + 2] = [merged]
         self._push_state()
 
+    SNAP_SECONDS = 0.75
+
     def marker_moved(self, idx: int, pos: float):
+        # Snap to a detected quiet gap when one is close by: the gap is
+        # almost always where the cut actually belongs.
+        for cut in getattr(self, "_silence_points", []):
+            if abs(cut - pos) <= self.SNAP_SECONDS:
+                pos = cut
+                break
         self.markers[idx] = pos
         self._refresh_table()
 
     def clear_markers(self):
+        self._checkpoint()
         self.markers = []
         self.titles = [self.titles[0] if self.titles else ""]
         self._push_state()
@@ -608,6 +671,8 @@ class TimelineDialog(QDialog):
         self._silence_worker.start()
 
     def _silences_done(self, cuts):
+        self._silence_points = list(cuts)
+        self._checkpoint()
         self.b_detect.setEnabled(True)
         self.b_detect.setText("Detect silences")
         cuts = [c for c in cuts if 1.0 < c < self.duration - 1.0]
@@ -690,6 +755,65 @@ class TimelineDialog(QDialog):
 
     def view_fit(self):
         self.view.zoom_fit()
+
+    # ------------------------------------------------------------- keyboard
+
+    NUDGE_SMALL = 0.10
+    NUDGE_LARGE = 1.0
+
+    def keyPressEvent(self, ev):
+        key, mods = ev.key(), ev.modifiers()
+        if key == Qt.Key_Space:
+            self._toggle_play()
+            return
+        if mods & Qt.ControlModifier and key == Qt.Key_Z:
+            self.undo()
+            return
+        if mods & Qt.ControlModifier and key in (Qt.Key_Y, Qt.Key_R):
+            self.redo()
+            return
+        if key in (Qt.Key_Left, Qt.Key_Right):
+            step = self.NUDGE_LARGE if mods & Qt.ShiftModifier else self.NUDGE_SMALL
+            if key == Qt.Key_Left:
+                step = -step
+            if self._nudge_selected_marker(step):
+                return
+            self.seek(max(0.0, min(self._last_pos + step * 10, self.duration)))
+            return
+        if key == Qt.Key_Delete:
+            self._delete_selected_marker()
+            return
+        super().keyPressEvent(ev)
+
+    def _selected_track_index(self) -> int | None:
+        items = self.table.selectedItems()
+        if not items:
+            return None
+        return self.table.indexOfTopLevelItem(items[0])
+
+    def _nudge_selected_marker(self, delta: float) -> bool:
+        """Arrow keys move the cut that starts the selected track — the way
+        you fine-tune a boundary once you can hear it's slightly off."""
+        idx = self._selected_track_index()
+        if idx is None or idx == 0 or not self.markers:
+            return False
+        m = idx - 1                       # track N starts at marker N-1
+        if m >= len(self.markers):
+            return False
+        self._checkpoint()
+        lo = self.markers[m - 1] + 0.2 if m > 0 else 0.0
+        hi = self.markers[m + 1] - 0.2 if m + 1 < len(self.markers) else self.duration
+        self.markers[m] = max(lo, min(self.markers[m] + delta, hi))
+        self._push_state()
+        self.table.setCurrentItem(self.table.topLevelItem(idx))
+        self.seek(self.markers[m])
+        return True
+
+    def _delete_selected_marker(self):
+        idx = self._selected_track_index()
+        if idx is None or idx == 0 or idx - 1 >= len(self.markers):
+            return
+        self.remove_marker(idx - 1)
 
     # ----------------------------------------------------------------- save
 

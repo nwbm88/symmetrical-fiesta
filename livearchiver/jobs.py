@@ -274,6 +274,17 @@ class JobQueue(QThread):
                                     cookies_browser=job.payload.get(
                                         "cookies_browser", ""))
                     ok, message, result = True, f"saved to {dest}", {"dest": str(dest)}
+                elif job.kind == "verify":
+                    from .integrity import verify_show
+                    res = verify_show(Path(job.payload["show_dir"]),
+                                      progress=prog,
+                                      quick=job.payload.get("quick", False))
+                    # The *job* succeeded as long as the check ran; whether
+                    # the files are intact is a finding, reported in result.
+                    ok = True
+                    message = ("all files intact" if res["status"] == "ok"
+                               else "; ".join(res["problems"][:3]))
+                    result = res
                 elif job.kind in ("split", "extract"):
                     res = split_show(Path(job.payload["show_dir"]),
                                      setlist_key=job.payload.get("setlist_key") or None,

@@ -24,6 +24,7 @@ from typing import Optional
 import requests
 
 from .platformsupport import safe_filename, is_bot_check, BOT_CHECK_HELP
+from .integrity import (record_checksums, free_space, human_bytes)
 
 log = logging.getLogger("livearchiver")
 
@@ -44,17 +45,43 @@ def _has_cancel(exc: BaseException) -> bool:
 
 
 def _clean_partial(dest: Path):
-    """Drop half-written files so a cancelled download leaves no debris."""
-    for p in dest.glob("source.*"):
-        try:
-            p.unlink()
-        except OSError:
-            pass
-    for p in dest.glob("*.part"):
-        try:
-            p.unlink()
-        except OSError:
-            pass
+    """Drop half-written files. Only used when the user cancels — an
+    *interrupted* download keeps its .part file so it can resume."""
+    for pattern in ("source.*", "*.part", "*.ytdl"):
+        for p in dest.glob(pattern):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    try:
+        if not any(dest.iterdir()):
+            dest.rmdir()
+    except OSError:
+        pass
+
+
+def partial_bytes(dest: Path) -> int:
+    """How much of an interrupted download is already on disk."""
+    return sum(p.stat().st_size for p in dest.glob("*.part") if p.is_file())
+
+
+class NotEnoughSpace(RuntimeError):
+    pass
+
+
+def _check_space(dest: Path, needed: int):
+    """Refuse to start a download that obviously cannot fit."""
+    if needed <= 0:
+        return
+    free = free_space(dest)
+    if free < 0:
+        return                       # couldn't tell; let it try
+    if free < needed:
+        raise NotEnoughSpace(
+            f"Not enough disk space: this download needs about "
+            f"{human_bytes(needed)} but only {human_bytes(free)} is free on "
+            f"the drive holding your collection.\n\nFree some space, or "
+            f"choose a lower quality / audio-only in the queue.")
 
 
 def _safe(name: str, maxlen: int = 120) -> str:
@@ -82,6 +109,22 @@ def _rename_to_match(dest: Path, rec: dict) -> Path:
         log.warning("could not rename show folder to %r (%s) — keeping %r",
                     wanted, e, dest.name)
         return dest
+
+
+def _fetch_cover(rec: dict, dest: Path):
+    """Save the source thumbnail as cover.jpg for later embedding."""
+    from .tagging import find_cover, save_cover
+    from .thumbnails import full_size_urls
+    if find_cover(dest):
+        return
+    for url in full_size_urls(rec):
+        try:
+            r = requests.get(url, timeout=20)
+            if r.ok and len(r.content) > 1000:
+                save_cover(dest, r.content)
+                return
+        except Exception:
+            continue
 
 
 def show_dir_name(rec: dict) -> str:
@@ -164,6 +207,20 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
     (dest / "show.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     log.info("saved %s", dest / "show.json")
 
+    # Grab the thumbnail once, for embedding as album art at split time.
+    try:
+        _fetch_cover(rec, dest)
+    except Exception as e:
+        log.debug("cover art unavailable: %s", e)
+
+    # Record what we got, so corruption or truncation can be detected later.
+    try:
+        if progress:
+            progress(None, "recording checksums ...")
+        record_checksums(dest)
+    except Exception as e:
+        log.warning("could not record checksums: %s", e)
+
     if not show["date"] or not show["venue"]:
         log.warning("could not determine %s for this show — edit %s and fill in "
                     '"show": {"date": ..., "venue": ...} by hand',
@@ -183,11 +240,19 @@ def _download_youtube(rec: dict, dest: Path, quality: str,
 
     audio_only = quality == "audio"
 
+    checked_space = [False]
+
     def hook(d):
         # The progress hook is the only place yt-dlp lets us interrupt a
         # download in flight; raising here unwinds it cleanly.
         if should_cancel and should_cancel():
             raise _Cancelled()
+        if not checked_space[0] and d.get("status") == "downloading":
+            checked_space[0] = True
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            # video and audio are downloaded separately then merged, so the
+            # peak requirement is roughly twice the final size
+            _check_space(dest, int(total * 2.2))
         if not progress:
             return
         if d.get("status") == "downloading":
@@ -210,6 +275,12 @@ def _download_youtube(rec: dict, dest: Path, quality: str,
         "merge_output_format": None if audio_only else "mkv",
         "noplaylist": True,
         "progress_hooks": [hook],
+        # keep .part files and pick them up next time: a 4 GB download that
+        # dies at 90% should not start again from zero
+        "continuedl": True,
+        "nopart": False,
+        "retries": 10,
+        "fragment_retries": 10,
         # comments often carry the date/venue/setlist the title lacks
         "getcomments": True,
         "extractor_args": {"youtube": {"max_comments": ["150"],
@@ -217,6 +288,9 @@ def _download_youtube(rec: dict, dest: Path, quality: str,
     }
     if cookies_browser:
         opts["cookiesfrombrowser"] = (cookies_browser,)
+    resumed = partial_bytes(dest)
+    if resumed and progress:
+        progress(None, f"resuming — {human_bytes(resumed)} already downloaded")
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(rec["url"], download=True)
@@ -266,27 +340,49 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
         raise RuntimeError(f"no downloadable media files found in {identifier}")
 
     total_bytes = sum(int(f.get("size", 0)) for f in chosen) or None
+    _check_space(dest, int((total_bytes or 0) * 1.1))
     done_bytes = 0
     saved = []
     for f in chosen:
         url = f"https://archive.org/download/{identifier}/{f['name']}"
         out = dest / _safe(Path(f["name"]).name)
-        if out.exists() and out.stat().st_size == int(f.get("size", -1)):
+        expected = int(f.get("size", -1))
+        if out.exists() and out.stat().st_size == expected:
             log.info("already have %s", out.name)
             saved.append(out.name)
-            done_bytes += int(f.get("size", 0))
+            done_bytes += max(expected, 0)
             continue
-        log.info("downloading %s (%.1f MB)", f["name"], int(f.get("size", 0)) / 1e6)
-        with requests.get(url, stream=True, timeout=60) as r:
-            r.raise_for_status()
-            with open(out, "wb") as fh:
+
+        # Resume a part-downloaded file rather than starting over.
+        part = out.with_suffix(out.suffix + ".part")
+        have = part.stat().st_size if part.exists() else 0
+        headers = {}
+        mode = "wb"
+        if have and expected > 0 and have < expected:
+            headers["Range"] = f"bytes={have}-"
+            mode = "ab"
+            log.info("resuming %s at %s", f["name"], human_bytes(have))
+            if progress:
+                progress(None, f"resuming {Path(f['name']).name} at "
+                               f"{human_bytes(have)}")
+        else:
+            have = 0
+
+        log.info("downloading %s (%.1f MB)", f["name"], max(expected, 0) / 1e6)
+        with requests.get(url, stream=True, timeout=60, headers=headers) as r:
+            if have and r.status_code == 200:
+                # server ignored the range request — start clean
+                have, mode = 0, "wb"
+            elif have and r.status_code != 206:
+                r.raise_for_status()
+            else:
+                r.raise_for_status()
+            done_bytes += have
+            with open(part, mode) as fh:
                 for chunk in r.iter_content(1 << 20):
                     if should_cancel and should_cancel():
                         fh.close()
-                        try:
-                            out.unlink()
-                        except OSError:
-                            pass
+                        part.unlink(missing_ok=True)
                         from .jobs import JobCancelled
                         raise JobCancelled()
                     fh.write(chunk)
@@ -294,6 +390,7 @@ def _download_archive_org(rec: dict, dest: Path, audio_only: bool,
                     if progress and total_bytes:
                         progress(min(done_bytes / total_bytes, 1.0),
                                  f"downloading {Path(f['name']).name}")
+        part.replace(out)
         saved.append(out.name)
 
     md = meta.get("metadata", {})

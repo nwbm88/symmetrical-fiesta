@@ -25,8 +25,8 @@ import queue
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl
-from PySide6.QtGui import QDesktopServices, QFont
+from PySide6.QtCore import Qt, QThread, Signal, QSettings, QUrl, QSize
+from PySide6.QtGui import QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QCheckBox, QLineEdit, QTreeWidget, QTreeWidgetItem, QSplitter,
@@ -42,6 +42,7 @@ from .jobs import (Job, JobQueue, QUALITY_CHOICES, QUALITY_SHORT,
                    QUEUED, RUNNING, DONE, FAILED, CANCELLED)
 from .pipeline import scan_collection
 from .platformsupport import check_ffmpeg, COOKIE_BROWSERS
+from .thumbnails import ThumbnailCache, THUMB_W, THUMB_H
 from .showinfo import extract_date
 from .tracks import tracks_from_description
 
@@ -220,6 +221,11 @@ class MainWindow(QMainWindow):
         self.cat.setdefault("ignored", {})
         self.cat.setdefault("finished_artists", {})
 
+        self.thumbs = ThumbnailCache(
+            self.catalog_path.parent / ".thumbnails", self)
+        self.thumbs.ready.connect(self._thumb_arrived)
+        self._thumb_rows: dict[str, list] = {}
+
         self.queue = JobQueue(self)
         self.queue.job_progress.connect(self.on_job_progress)
         self.queue.job_finished.connect(self.on_job_finished)
@@ -301,6 +307,13 @@ class MainWindow(QMainWindow):
         self.f_new = QCheckBox("Still to download")
         self.f_dupes = QCheckBox("Only shows with multiple versions")
         self.f_ignored = QCheckBox("Show ignored")
+        self.show_thumbs = QCheckBox("Thumbnails")
+        self.show_thumbs.setToolTip("Show a preview image for each version. "
+                                    "Images are cached on disk after the "
+                                    "first fetch.")
+        self.show_thumbs.setChecked(
+            self.settings.value("show_thumbs", "true") == "true")
+        self.show_thumbs.toggled.connect(self._toggle_thumbs)
         self.f_text = QLineEdit()
         self.f_text.setPlaceholderText("filter by title / venue / date ...")
         for cb in (self.f_new, self.f_dupes, self.f_ignored):
@@ -309,6 +322,7 @@ class MainWindow(QMainWindow):
         filters.addWidget(self.f_new)
         filters.addWidget(self.f_dupes)
         filters.addWidget(self.f_ignored)
+        filters.addWidget(self.show_thumbs)
         filters.addWidget(self.f_text, 1)
         outer.addLayout(filters)
 
@@ -317,16 +331,17 @@ class MainWindow(QMainWindow):
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Show / version", "Source", "Length",
                                    "Quality", "Views", "Status"])
-        self.tree.setColumnWidth(0, 330)
-        for col, width in ((1, 78), (2, 66), (3, 60), (4, 74), (5, 92)):
+        self.tree.setIconSize(QSize(THUMB_W, THUMB_H))
+        for col, width in ((1, 74), (2, 62), (3, 56), (4, 68), (5, 88)):
             self.tree.setColumnWidth(col, width)
+        self._apply_title_width()
         self.tree.setAlternatingRowColors(True)
         self.tree.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.tree.itemDoubleClicked.connect(self.open_recording_page)
         split.addWidget(self.tree)
 
         split.addWidget(self._build_queue_panel())
-        split.setSizes([700, 560])
+        split.setSizes([820, 440])
         outer.addWidget(split, 1)
 
         btns = QHBoxLayout()
@@ -480,6 +495,7 @@ class MainWindow(QMainWindow):
 
     def refresh_tree(self):
         self.tree.clear()
+        self._thumb_rows = {}
         downloaded = self.cat["downloaded"]
         ignored = self.cat["ignored"]
         needle = self.f_text.text().strip().lower()
@@ -534,8 +550,41 @@ class MainWindow(QMainWindow):
                 child.setData(0, REC_ROLE, r["id"])
                 child.setToolTip(0, r["url"])
                 top.addChild(child)
+                if self.show_thumbs.isChecked():
+                    pix = self.thumbs.get(r)
+                    if pix is not None:
+                        child.setIcon(0, QIcon(pix))
+                    else:
+                        child.setIcon(0, self._placeholder_icon())
+                    self._thumb_rows.setdefault(r["id"], []).append(child)
             self.tree.addTopLevelItem(top)
         self.tree.expandAll()
+
+    def _apply_title_width(self):
+        """The title column needs the extra room a thumbnail takes up."""
+        on = self.show_thumbs.isChecked()
+        self.tree.setColumnWidth(0, 330 + (THUMB_W + 8 if on else 0))
+
+    def _toggle_thumbs(self, on: bool):
+        self.settings.setValue("show_thumbs", "true" if on else "false")
+        self.tree.setIconSize(QSize(THUMB_W, THUMB_H) if on else QSize(1, 1))
+        self._apply_title_width()
+        self.refresh_tree()
+
+    def _placeholder_icon(self) -> QIcon:
+        """A neutral tile so rows don't jump around as images arrive."""
+        if not hasattr(self, "_placeholder"):
+            pix = QPixmap(THUMB_W, THUMB_H)
+            pix.fill(Qt.transparent)
+            self._placeholder = QIcon(pix)
+        return self._placeholder
+
+    def _thumb_arrived(self, rec_id: str, pix):
+        for item in self._thumb_rows.get(rec_id, []):
+            try:
+                item.setIcon(0, QIcon(pix))
+            except RuntimeError:
+                pass          # row was rebuilt while the fetch was in flight
 
     def _selected_rec_ids(self) -> list[str]:
         ids, seen = [], set()
@@ -625,6 +674,11 @@ class MainWindow(QMainWindow):
         b_refresh = QPushButton("Refresh")
         b_refresh.clicked.connect(self.refresh_collection)
         llay.addWidget(b_refresh)
+        b_verify_all = QPushButton("Verify whole collection")
+        b_verify_all.setToolTip("Check every downloaded show against its "
+                                "recorded checksums.")
+        b_verify_all.clicked.connect(self.verify_all)
+        llay.addWidget(b_verify_all)
         split.addWidget(left)
 
         right = QWidget()
@@ -674,9 +728,20 @@ class MainWindow(QMainWindow):
         b_resolve.clicked.connect(self.resolve_text)
         b_edit = QPushButton("Edit date/venue")
         b_edit.clicked.connect(self.edit_show)
+        b_verify = QPushButton("Verify files")
+        b_verify.setToolTip("Re-check the downloaded files against the "
+                            "checksums recorded when they arrived, catching "
+                            "corruption and truncated downloads.")
+        b_verify.clicked.connect(self.queue_verify)
+        b_record = QPushButton("Record checksums")
+        b_record.setToolTip("Store checksums for a show downloaded before "
+                            "this feature existed, so it can be verified "
+                            "from now on.")
+        b_record.clicked.connect(self.record_checksums_for_show)
         b_open = QPushButton("Open folder")
         b_open.clicked.connect(self.open_show_folder)
-        for b in (self.b_split, b_resplit, b_timeline, b_resolve, b_edit, b_open):
+        for b in (self.b_split, b_resplit, b_timeline, b_resolve, b_verify,
+                  b_record, b_edit, b_open):
             btns.addWidget(b)
         btns.addStretch(1)
         rlay.addLayout(btns)
@@ -779,6 +844,61 @@ class MainWindow(QMainWindow):
         if dlg.exec() != QDialog.Accepted:
             return
         self._apply_show_values(s, dlg.values())
+
+    def _report_verification(self, job, result):
+        """A verification that ran is not a failure, whatever it found."""
+        from .integrity import OK, NO_RECORD
+        name = job.label.replace("verify: ", "")
+        if result["status"] == OK:
+            self.statusBar().showMessage(f"{name}: all files intact.")
+            return
+        if result["status"] == NO_RECORD:
+            # Normal for anything downloaded before checksums existed.
+            self._unrecorded_shows = getattr(self, "_unrecorded_shows", 0) + 1
+            self.statusBar().showMessage(
+                f"{name}: no checksums on record — nothing to compare "
+                f"against. Use “Record checksums” to start tracking it.")
+            return
+        QMessageBox.warning(
+            self, "Verification found problems",
+            f"{name}\n\n"
+            + "\n".join(f"• {p}" for p in result["problems"])
+            + "\n\nRe-download the show to repair it — the original is the "
+              "copy that matters; the split audio can always be regenerated.")
+
+    def record_checksums_for_show(self):
+        s = self._current_show()
+        if not s:
+            return
+        from .integrity import record_checksums
+        try:
+            data = record_checksums(s["dir"])
+            self.statusBar().showMessage(
+                f"Recorded checksums for {len(data['files'])} file(s) in "
+                f"{s['dir'].name}.")
+        except Exception as e:
+            QMessageBox.warning(self, "Could not record checksums", str(e))
+
+    def queue_verify(self):
+        s = self._current_show()
+        if not s:
+            return
+        self._enqueue(Job("verify", f"verify: {s['dir'].name[:60]}",
+                          {"show_dir": str(s["dir"])}))
+
+    def verify_all(self):
+        shows = getattr(self, "shows", [])
+        if not shows:
+            return
+        if QMessageBox.question(
+                self, "Verify collection",
+                f"Check all {len(shows)} downloaded show(s) against their "
+                f"recorded checksums? This reads every file, so it can take a "
+                f"while on a big collection.") != QMessageBox.Yes:
+            return
+        for sh in shows:
+            self._enqueue(Job("verify", f"verify: {sh['dir'].name[:60]}",
+                              {"show_dir": str(sh["dir"])}))
 
     def open_timeline(self):
         s = self._current_show()
@@ -1188,7 +1308,9 @@ class MainWindow(QMainWindow):
             if ok and job.kind == "download":
                 self.cat["downloaded"][job.payload["rec"]["id"]] = result["dest"]
                 self.save_catalog()
-            if not ok and job.status != CANCELLED:
+            if job.kind == "verify" and result:
+                self._report_verification(job, result)
+            elif not ok and job.status != CANCELLED:
                 QMessageBox.warning(self, "Job failed",
                                     f"{job.label}\n\n{msg}")
             elif ok and result and result.get("warnings"):

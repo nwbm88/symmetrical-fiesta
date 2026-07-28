@@ -21,8 +21,24 @@ def load(path: Path) -> dict:
     return {"recordings": {}, "downloaded": {}}
 
 
-def save(cat: dict, path: Path) -> None:
-    path.write_text(json.dumps(cat, indent=2, ensure_ascii=False))
+def save(cat: dict, path: Path, backup: bool = True) -> None:
+    """Write the catalogue, keeping rotating backups of the previous state.
+
+    The catalogue holds curation that cannot be re-downloaded — which
+    duplicate you chose, what you ignored, which bands are finished — so it
+    is worth a few kilobytes of insurance.  The write itself goes via a
+    temporary file so an interrupted save cannot leave a truncated catalogue.
+    """
+    path = Path(path)
+    if backup and path.exists():
+        try:
+            from .integrity import backup_catalog
+            backup_catalog(path)
+        except Exception:
+            pass
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(cat, indent=2, ensure_ascii=False))
+    tmp.replace(path)
 
 
 def merge_results(cat: dict, results: list[dict]) -> int:
