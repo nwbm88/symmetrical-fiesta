@@ -1,0 +1,23 @@
+# Python bytecode and build output
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# The environment run.bat creates (when not relocated to %LOCALAPPDATA%)
+.venv/
+venv/
+
+# ffmpeg, if unzipped next to run.bat as the README suggests
+/ffmpeg/
+
+# --- runtime data ---------------------------------------------------------
+# The app is normally run from its own folder, so a user's archive and
+# settings land right beside the code.  None of it belongs in git: the
+# collection is gigabytes, and the catalogue is personal curation.
+/catalog.json
+/catalog.json.tmp
+/catalog.backups/
+/collection/
+/.thumbnails/
