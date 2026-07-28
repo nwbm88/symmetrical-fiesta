@@ -40,9 +40,21 @@ def extract_master(show_dir: Path) -> Path:
     audio_dir = show_dir / "audio"
     audio_dir.mkdir(exist_ok=True)
     master = audio_dir / "full.flac"
-    if master.exists():
+    # A previous extraction that was interrupted leaves an empty (or absurdly
+    # small) file behind.  Treating that as "already done" makes every later
+    # step fail with a baffling error, and nothing would ever rebuild it.
+    if master.exists() and master.stat().st_size > 1024:
         log.info("master already exists: %s", master)
         return master
+    if master.exists():
+        log.warning("existing %s is empty or truncated — re-extracting",
+                    master.name)
+        try:
+            master.unlink()
+        except OSError as e:
+            raise RuntimeError(
+                f"{master} is empty or truncated and could not be removed "
+                f"({e}). Delete it and try again.") from e
 
     sources = find_source_media(show_dir)
     if not sources:
@@ -68,7 +80,17 @@ def extract_master(show_dir: Path) -> Path:
 def duration_of(media: Path) -> float:
     p = _run([ffprobe(), "-v", "error", "-show_entries", "format=duration",
               "-of", "default=noprint_wrappers=1:nokey=1", str(media)])
-    return float(p.stdout.strip())
+    text = (p.stdout or "").strip()
+    try:
+        return float(text)
+    except ValueError:
+        # ffprobe prints "N/A" or nothing for a file it cannot make sense of;
+        # a bare ValueError here tells the user nothing useful.
+        detail = (p.stderr or "").strip().splitlines()
+        raise RuntimeError(
+            f"could not read the length of {media.name} — the file looks "
+            f"damaged or is not audio"
+            + (f" ({detail[-1][:160]})" if detail else "")) from None
 
 
 _SIL_END = re.compile(r"silence_end:\s*([\d.]+)\s*\|\s*silence_duration:\s*([\d.]+)")
@@ -150,6 +172,41 @@ def sanitize_tracks(tracks: list[dict], total: float) -> tuple[list[dict], list[
     return clean, warnings
 
 
+# Files this module generates: "01 - Title.flac".  Anything else in the
+# audio folder (full.flac, tracks.json, peaks.json, show.cue) is not ours.
+TRACK_FILE_RE = re.compile(r"^\d{2,3} - .+\.flac$", re.IGNORECASE)
+_TEMP_SUFFIXES = (".rgtmp.flac", ".arttmp.flac")
+
+
+def is_track_file(name: str) -> bool:
+    return bool(TRACK_FILE_RE.match(name)) and not name.endswith(_TEMP_SUFFIXES)
+
+
+def clear_previous_tracks(audio_dir: Path) -> int:
+    """Remove tracks from an earlier split of this show.
+
+    Without this a re-split leaves the old files alongside the new ones —
+    fix a 12-track tracklist down to 8 and you keep four orphans, plus two
+    files both claiming to be track 01.  Only files this module writes are
+    touched; the master, tracklist, waveform cache and cue sheet are not.
+    """
+    removed = 0
+    if not audio_dir.exists():
+        return 0
+    for p in audio_dir.glob("*.flac"):
+        if p.name == "full.flac":
+            continue
+        if is_track_file(p.name) or p.name.endswith(_TEMP_SUFFIXES):
+            try:
+                p.unlink()
+                removed += 1
+            except OSError as e:
+                log.warning("could not remove old track %s: %s", p.name, e)
+    if removed:
+        log.info("removed %d track(s) from the previous split", removed)
+    return removed
+
+
 def cut_tracks(master: Path, tracks: list[dict], show: dict,
                artist: str = "Unknown Artist",
                album: Optional[str] = None, progress=None) -> list[Path]:
@@ -164,6 +221,10 @@ def cut_tracks(master: Path, tracks: list[dict], show: dict,
         raise RuntimeError("no usable tracks after checking the tracklist "
                            "against the audio length — use the timeline "
                            "editor to place the cuts by hand")
+
+    # Only once we know the new split is viable — never leave a show with no
+    # tracks at all because a re-split turned out to be impossible.
+    clear_previous_tracks(out_dir)
 
     written = []
     for i, t in enumerate(tracks, 1):

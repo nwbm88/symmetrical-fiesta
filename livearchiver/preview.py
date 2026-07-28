@@ -108,6 +108,10 @@ class PreviewDialog(QDialog):
         self.rec = rec
         self.cookies_browser = cookies_browser
         self.queue_requested = False
+        # Resolving a stream takes seconds; the user can close the dialog
+        # first.  Without this the resolver still returns, builds a player
+        # and starts audio with no window to stop it.
+        self._closed = False
         self._player = None
         self._video = None
         self._duration = float(rec.get("duration") or 0)
@@ -214,6 +218,8 @@ class PreviewDialog(QDialog):
     # ------------------------------------------------------------ thumbnail
 
     def _thumb_ready(self, data: bytes):
+        if self._closed:
+            return
         pix = QPixmap()
         if pix.loadFromData(data):
             self._pixmap = pix
@@ -259,6 +265,8 @@ class PreviewDialog(QDialog):
         self._resolver.start()
 
     def _stream_failed(self, msg):
+        if self._closed:
+            return
         self.play_btn.setEnabled(True)
         if msg == "youtube-bot-check":
             self.status.setText(
@@ -271,6 +279,8 @@ class PreviewDialog(QDialog):
                 f"works, and downloading is unaffected.")
 
     def _stream_ready(self, url: str, duration: float):
+        if self._closed:
+            return          # the dialog went away while we were resolving
         try:
             from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
             from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -329,11 +339,24 @@ class PreviewDialog(QDialog):
     # --------------------------------------------------------------- close
 
     def _teardown(self):
+        self._closed = True
         if self._player is not None:
             self._player.stop()
             self._player.setSource(QUrl())
+        # Detach first: a worker that outlives this dialog must not be able
+        # to call back into it.  Then give it a moment to wind down.
         for w in (self._resolver, self._thumb_loader):
-            if w is not None and w.isRunning():
+            if w is None:
+                continue
+            try:
+                w.ready.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            try:
+                w.failed.disconnect()
+            except (RuntimeError, TypeError):
+                pass
+            if w.isRunning():
                 w.wait(1500)
 
     def accept(self):

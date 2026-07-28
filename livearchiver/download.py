@@ -128,8 +128,9 @@ def _fetch_cover(rec: dict, dest: Path):
 
 
 def show_dir_name(rec: dict) -> str:
-    date = rec["show"].get("date") or "unknown-date"
-    venue = rec["show"].get("venue") or rec["title"][:60]
+    show = rec.get("show") or {}
+    date = show.get("date") or "unknown-date"
+    venue = show.get("venue") or (rec.get("title") or "untitled show")[:60]
     return _safe(f"{date} - {venue}")
 
 
@@ -142,6 +143,14 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
     quality:       key from jobs.QUALITY_CHOICES ("best", "720", "audio", ...)
     should_cancel: callable returning True to abort the download
     """
+    source = rec.get("source")
+    if source not in ("youtube", "archive.org"):
+        # Check before creating folders, so a bad record fails with a clear
+        # message rather than a stray KeyError from somewhere downstream.
+        raise ValueError(
+            f"don't know how to download from {source!r} — expected "
+            f"'youtube' or 'archive.org'")
+
     if quality is None:
         quality = "audio" if audio_only else "best"
     audio_only = quality == "audio"
@@ -152,11 +161,9 @@ def download(rec: dict, collection: Path, audio_only: bool = False,
     if rec["source"] == "youtube":
         info = _download_youtube(rec, dest, quality, progress, should_cancel,
                                  cookies_browser)
-    elif rec["source"] == "archive.org":
+    else:
         info = _download_archive_org(rec, dest, audio_only, progress,
                                      should_cancel)
-    else:
-        raise ValueError(f"unknown source {rec['source']}")
 
     # Refine the show guess with full metadata now that we have it.  Check
     # the catalogue title as well as the fetched one: an extractor can return

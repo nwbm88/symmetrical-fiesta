@@ -11,14 +11,61 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 from pathlib import Path
 from typing import Optional
 
+log = logging.getLogger("livearchiver")
+
+
+EMPTY = {"recordings": {}, "downloaded": {}, "ignored": {},
+         "finished_artists": {}}
+
+
+def _normalise(cat: dict) -> dict:
+    """Make a catalogue safe to use however it was edited."""
+    if not isinstance(cat, dict):
+        return dict(EMPTY)
+    for key, default in EMPTY.items():
+        if not isinstance(cat.get(key), dict):
+            cat[key] = dict(default) if isinstance(default, dict) else default
+    # Every recording needs a show dict; a hand-edited catalogue may not have
+    # one, and a KeyError here would take the whole Get Music view down.
+    for rid, rec in list(cat["recordings"].items()):
+        if not isinstance(rec, dict):
+            del cat["recordings"][rid]
+            continue
+        rec.setdefault("id", rid)
+        if not isinstance(rec.get("show"), dict):
+            rec["show"] = {}
+    return cat
+
 
 def load(path: Path) -> dict:
-    if path.exists():
-        return json.loads(path.read_text())
-    return {"recordings": {}, "downloaded": {}}
+    """Read the catalogue, falling back to the newest backup if it is
+    corrupt.  A damaged catalogue must never stop the app from starting —
+    and since the original is left untouched, nothing is lost by trying."""
+    path = Path(path)
+    if not path.exists():
+        return dict(EMPTY)
+    try:
+        return _normalise(json.loads(path.read_text()))
+    except Exception as e:
+        log.error("%s is unreadable (%s)", path, e)
+
+    from .integrity import latest_backup
+    backup = latest_backup(path)
+    if backup:
+        try:
+            cat = _normalise(json.loads(backup.read_text()))
+            log.warning("recovered the catalogue from %s — the damaged file "
+                        "has been left alone as %s", backup.name, path.name)
+            return cat
+        except Exception as e:
+            log.error("the backup %s is unreadable too (%s)", backup, e)
+    log.warning("starting with an empty catalogue; %s was left untouched",
+                path)
+    return dict(EMPTY)
 
 
 def save(cat: dict, path: Path, backup: bool = True) -> None:
@@ -30,6 +77,7 @@ def save(cat: dict, path: Path, backup: bool = True) -> None:
     temporary file so an interrupted save cannot leave a truncated catalogue.
     """
     path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if backup and path.exists():
         try:
             from .integrity import backup_catalog
@@ -69,7 +117,7 @@ def quality_score(rec: dict) -> float:
     q = (rec.get("quality") or "").lower()
     if "flac" in q or "wav" in q or "24bit" in q:
         score += 120
-    if rec["source"] == "archive.org":
+    if rec.get("source") == "archive.org":
         score += 20
     if rec.get("views"):
         score += min(rec["views"], 10**6) ** 0.5 / 10.0          # up to 100
@@ -82,8 +130,9 @@ def group_recordings(cat: dict) -> list[dict]:
     groups: dict[str, dict] = {}
     for rec in cat["recordings"].values():
         artist = rec.get("artist") or ""
-        date = rec["show"].get("date")
-        venue = rec["show"].get("venue")
+        show = rec.get("show") or {}
+        date = show.get("date")
+        venue = show.get("venue")
         if date and len(date) == 10:
             key = f"{artist.lower()}|date:{date}"
         elif date and _norm_venue(venue):
@@ -134,7 +183,7 @@ def artist_stats(cat: dict, shows: Optional[list] = None) -> list[dict]:
             e["downloaded"] += 1
         if rec["id"] in ignored:
             e["ignored"] += 1
-        e["shows"].add(rec["show"].get("date") or rec["id"])
+        e["shows"].add((rec.get("show") or {}).get("date") or rec.get("id"))
 
     for a in split_by_artist:
         out.setdefault(a, {"artist": a, "found": 0, "downloaded": 0,

@@ -141,19 +141,34 @@ def scan_collection(collection: Path) -> list[dict]:
         d = mf.parent
         try:
             manifest = json.loads(mf.read_text())
-        except Exception:
-            log.warning("unreadable show.json in %s — skipping", d)
+            if not isinstance(manifest, dict):
+                raise ValueError("show.json is not an object")
+            manifest.setdefault("show", {})
+            if not isinstance(manifest["show"], dict):
+                manifest["show"] = {}
+        except Exception as e:
+            log.warning("unreadable show.json in %s (%s) — skipping", d, e)
             continue
         audio_dir = d / "audio"
-        track_files = (sorted(p.name for p in audio_dir.glob("[0-9][0-9] - *.flac"))
+        track_files = (sorted(p.name for p in audio_dir.glob("*.flac")
+                              if audio_mod.is_track_file(p.name))
                        if audio_dir.exists() else [])
         tracklist = []
         tl = audio_dir / "tracks.json"
         if tl.exists():
             try:
-                tracklist = json.loads(tl.read_text())
-            except Exception:
-                pass
+                loaded = json.loads(tl.read_text())
+                # Hand-edited files can be anything at all; one bad tracklist
+                # must not take the whole Collection view down with it.
+                if isinstance(loaded, list):
+                    tracklist = [t for t in loaded if isinstance(t, dict)]
+                    if len(tracklist) != len(loaded):
+                        log.warning("%s has entries that aren't track objects "
+                                    "— ignoring those", tl)
+                else:
+                    log.warning("%s is not a list of tracks — ignoring it", tl)
+            except Exception as e:
+                log.warning("%s is not readable (%s) — ignoring it", tl, e)
         has_master = (audio_dir / "full.flac").exists()
         shows.append({
             "dir": d,
