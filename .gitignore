@@ -1,0 +1,9 @@
+# Scraped data and generated databases - rebuild with 'python3 -m wowdb update'
+data/
+*.db
+*.db-journal
+*.db-wal
+
+__pycache__/
+*.py[cod]
+.venv/
